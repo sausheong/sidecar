@@ -11,4 +11,5 @@ func TestSignalTypes(t *testing.T) {
 	assert.Equal(t, adapter.SignalType("git.commit"), adapter.SignalGitCommit)
 	assert.Equal(t, adapter.SignalType("schedule.tick"), adapter.SignalScheduleTick)
 	assert.Equal(t, adapter.SignalType("ondemand.task"), adapter.SignalOnDemand)
+	assert.Equal(t, adapter.SignalType("ci.failure"), adapter.SignalCIFailure)
 }

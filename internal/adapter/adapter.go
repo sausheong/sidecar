@@ -8,6 +8,7 @@ const (
 	SignalGitCommit    SignalType = "git.commit"
 	SignalScheduleTick SignalType = "schedule.tick"
 	SignalOnDemand     SignalType = "ondemand.task"
+	SignalCIFailure    SignalType = "ci.failure"
 )
 
 type Signal struct {
