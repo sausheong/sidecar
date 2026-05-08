@@ -44,3 +44,17 @@ func TestFormatMemoryBlock_PoliciesOnly(t *testing.T) {
 	assert.Contains(t, block, "never touch secrets/")
 	assert.NotContains(t, block, "**Architecture:**")
 }
+
+func TestBuildQueryFromSummary(t *testing.T) {
+	// Verify FormatMemoryBlock handles mixed-category results correctly
+	results := []*store.MemorySearchResult{
+		{Category: "semantic", Content: "auth is fragile", Similarity: 0.95},
+		{Category: "procedural", Content: "run make lint before commit", Similarity: 0.88},
+		{Category: "semantic", Content: "below threshold", Similarity: 0.60}, // excluded
+	}
+	block := memory.FormatMemoryBlock(results, []string{"never touch prod DB"})
+	assert.Contains(t, block, "auth is fragile")
+	assert.Contains(t, block, "make lint")
+	assert.NotContains(t, block, "below threshold")
+	assert.Contains(t, block, "never touch prod DB")
+}
