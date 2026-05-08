@@ -1,0 +1,25 @@
+workspace:
+  name: my-service
+  language: go
+
+signals:
+  - adapter: git
+    watch: [push, pr]
+  - adapter: schedule
+    cron: "0 2 * * *"
+
+autonomy:
+  dependency_updates: auto-commit
+  test_fixes: auto-commit
+  bug_fixes: pull-request
+  refactoring: suggest-only
+  schema_changes: suggest-only
+
+models:
+  planning: anthropic/claude-sonnet-4-6
+  coding: anthropic/claude-sonnet-4-6
+  triage: anthropic/claude-haiku-4-5
+
+scope:
+  include: [src/, tests/]
+  exclude: [secrets/]
