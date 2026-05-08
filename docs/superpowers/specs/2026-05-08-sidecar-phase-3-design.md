@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS memory_entries (
     workspace_id UUID NOT NULL REFERENCES workspaces(id),
     category     TEXT NOT NULL,   -- "episodic" | "semantic" | "procedural"
     content      TEXT NOT NULL,
-    embedding    vector(1536),    -- OpenAI text-embedding-3-small default (1536 dims)
+    embedding    vector(1024),    -- 1024 dims: OpenAI (with dimensions param) + Voyage AI native
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 -- IVFFlat index for approximate nearest-neighbor search
@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS policies (
 );
 ```
 
-**Note on dimensions:** The schema uses `vector(1536)` matching OpenAI `text-embedding-3-small`. Users configuring Voyage AI must set `output_dimension: 1536` in their Voyage API call to match.
+**Note on dimensions:** The schema uses `vector(1024)`. OpenAI embeddings are requested with `dimensions: 1024`. Voyage AI `voyage-4` natively defaults to 1024 dimensions — no `output_dimension` override needed.
 
 ---
 
@@ -102,7 +102,7 @@ type MemoryEntry struct {
 - API: `POST https://api.openai.com/v1/embeddings`
 - Model: `text-embedding-3-small` (default), configurable
 - Auth: `Authorization: Bearer $OPENAI_API_KEY`
-- Dims: 1536
+- Dims: 1024 (requested via `dimensions: 1024` parameter)
 - `inputType` parameter is ignored (OpenAI does not use query/document distinction)
 
 ### Voyage AI implementation (`internal/memory/voyage.go`)
@@ -110,7 +110,7 @@ type MemoryEntry struct {
 - API: `POST https://api.voyageai.com/v1/embeddings`
 - Model: `voyage-4` (default), configurable
 - Auth: `Authorization: Bearer $VOYAGE_API_KEY`
-- Dims: 1024 by default — users must configure `output_dimension: 1536` to match the schema
+- Dims: 1024 (voyage-4 native default — no `output_dimension` override needed)
 - `inputType` maps to `input_type: "document"` or `input_type: "query"` per Voyage API spec
 
 ---

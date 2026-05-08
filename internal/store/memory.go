@@ -93,9 +93,11 @@ func (db *DB) GetPolicies(ctx context.Context, workspaceID uuid.UUID) ([]string,
 }
 
 // StorePolicy writes a policy rule. source is "yaml" or "learned".
+// Duplicate (workspace_id, rule) pairs are silently ignored.
 func (db *DB) StorePolicy(ctx context.Context, workspaceID uuid.UUID, rule, source string) error {
 	_, err := db.pool.Exec(ctx, `
-		INSERT INTO policies (workspace_id, rule, source) VALUES ($1, $2, $3)`,
+		INSERT INTO policies (workspace_id, rule, source) VALUES ($1, $2, $3)
+		ON CONFLICT (workspace_id, rule) DO NOTHING`,
 		workspaceID, rule, source,
 	)
 	if err != nil {

@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS memory_entries (
     workspace_id UUID NOT NULL REFERENCES workspaces(id),
     category     TEXT NOT NULL,    -- "episodic" | "semantic" | "procedural"
     content      TEXT NOT NULL,
-    embedding    vector(1536),     -- OpenAI text-embedding-3-small (1536 dims)
+    embedding    vector(1024),     -- 1024 dims: OpenAI (with dimensions param) + Voyage AI native
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS memory_entries_embedding_idx
@@ -55,3 +55,5 @@ CREATE TABLE IF NOT EXISTS policies (
 );
 CREATE INDEX IF NOT EXISTS policies_workspace_idx
     ON policies (workspace_id);
+CREATE UNIQUE INDEX IF NOT EXISTS policies_workspace_rule_unique
+    ON policies (workspace_id, rule);

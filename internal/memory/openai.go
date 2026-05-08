@@ -38,14 +38,15 @@ func NewOpenAIWithBaseURL(apiKey, model, baseURL string) *OpenAIProvider {
 	}
 }
 
-// Dims returns 1536 (text-embedding-3-small fixed dimension).
-func (p *OpenAIProvider) Dims() int { return 1536 }
+// Dims returns 1024 (reduced via dimensions param to match schema).
+func (p *OpenAIProvider) Dims() int { return 1024 }
 
 // Embed calls the OpenAI embeddings API. inputType is ignored (OpenAI has no query/document distinction).
 func (p *OpenAIProvider) Embed(ctx context.Context, texts []string, _ string) ([][]float32, error) {
 	payload := map[string]any{
-		"input": texts,
-		"model": p.model,
+		"input":      texts,
+		"model":      p.model,
+		"dimensions": 1024, // reduce from 1536 to match schema
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {

@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"log"
+	"log/slog"
 	"os"
 
 	"github.com/sausheong/sidecar/internal/config"
@@ -15,14 +15,14 @@ func buildEmbeddingProvider(cfg *config.Config) memory.EmbeddingProvider {
 	case "openai":
 		apiKey := os.Getenv("OPENAI_API_KEY")
 		if apiKey == "" {
-			log.Printf("warning: embedding.provider=openai but OPENAI_API_KEY not set; memory disabled")
+			slog.Warn("embedding API key not set, memory disabled", "provider", "openai")
 			return nil
 		}
 		return memory.NewOpenAI(apiKey, cfg.Embedding.Model)
 	case "voyage":
 		apiKey := os.Getenv("VOYAGE_API_KEY")
 		if apiKey == "" {
-			log.Printf("warning: embedding.provider=voyage but VOYAGE_API_KEY not set; memory disabled")
+			slog.Warn("embedding API key not set, memory disabled", "provider", "voyage")
 			return nil
 		}
 		return memory.NewVoyage(apiKey, cfg.Embedding.Model)

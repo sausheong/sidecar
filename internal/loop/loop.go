@@ -190,6 +190,7 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		summary := textBuf.String()
 		_ = l.db.AppendTaskEvent(ctx, task.ID, "suggestion", map[string]any{"summary": summary})
 		slog.Info("sidecar suggestion recorded", "task", task.ID, "change_type", tr.ChangeType)
+		task.Status = StatusSuggested
 		l.launchReflect(task)
 		return l.db.UpdateTaskStatus(ctx, task.ID, StatusSuggested)
 
@@ -202,6 +203,7 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		}
 		if branch == output.BranchNoChanges {
 			slog.Info("sidecar: no changes to commit", "task", task.ID)
+			task.Status = StatusCompleted
 			l.launchReflect(task)
 			return l.db.UpdateTaskStatus(ctx, task.ID, StatusCompleted)
 		}
@@ -216,6 +218,7 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 				slog.Info("sidecar PR created", "url", prURL, "task", task.ID)
 			}
 		}
+		task.Status = StatusCompleted
 		l.launchReflect(task)
 		return l.db.UpdateTaskStatus(ctx, task.ID, StatusCompleted)
 
@@ -229,6 +232,7 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		if branch != output.BranchNoChanges {
 			slog.Info("sidecar committed changes", "branch", branch, "task", task.ID)
 		}
+		task.Status = StatusCompleted
 		l.launchReflect(task)
 		return l.db.UpdateTaskStatus(ctx, task.ID, StatusCompleted)
 	}

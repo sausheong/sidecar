@@ -13,7 +13,7 @@ const voyageBase = "https://api.voyageai.com"
 const voyageDefaultModel = "voyage-4"
 
 // VoyageProvider embeds text using Voyage AI's embedding API.
-// Output is fixed at 1536 dimensions to match the memory_entries schema.
+// voyage-4 defaults to 1024 dimensions, matching the memory_entries schema.
 type VoyageProvider struct {
 	apiKey  string
 	model   string
@@ -39,17 +39,17 @@ func NewVoyageWithBaseURL(apiKey, model, baseURL string) *VoyageProvider {
 	}
 }
 
-// Dims returns 1536 (output_dimension configured to match the schema).
-func (p *VoyageProvider) Dims() int { return 1536 }
+// Dims returns 1024 (voyage-4 native default, matches schema).
+func (p *VoyageProvider) Dims() int { return 1024 }
 
 // Embed calls the Voyage AI embeddings API.
 // inputType is "document" (when storing) or "query" (when searching).
 func (p *VoyageProvider) Embed(ctx context.Context, texts []string, inputType string) ([][]float32, error) {
 	payload := map[string]any{
-		"input":            texts,
-		"model":            p.model,
-		"input_type":       inputType,
-		"output_dimension": 1536, // must match memory_entries.embedding dimension
+		"input":      texts,
+		"model":      p.model,
+		"input_type": inputType,
+		// no output_dimension — voyage-4 defaults to 1024
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {

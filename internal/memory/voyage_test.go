@@ -21,12 +21,12 @@ func TestVoyageProvider_Embed(t *testing.T) {
 		json.NewDecoder(r.Body).Decode(&body)
 		assert.Equal(t, "voyage-4", body["model"])
 		assert.Equal(t, "document", body["input_type"])
-		assert.Equal(t, float64(1536), body["output_dimension"])
+		assert.Nil(t, body["output_dimension"]) // no override — voyage-4 defaults to 1024
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
 			"data": []map[string]any{
-				{"embedding": make([]float32, 1536), "index": 0},
+				{"embedding": make([]float32, 1024), "index": 0},
 			},
 		})
 	}))
@@ -36,10 +36,10 @@ func TestVoyageProvider_Embed(t *testing.T) {
 	result, err := p.Embed(context.Background(), []string{"test text"}, "document")
 	require.NoError(t, err)
 	require.Len(t, result, 1)
-	assert.Len(t, result[0], 1536)
+	assert.Len(t, result[0], 1024)
 }
 
 func TestVoyageProvider_Dims(t *testing.T) {
 	p := memory.NewVoyage("key", "")
-	assert.Equal(t, 1536, p.Dims())
+	assert.Equal(t, 1024, p.Dims())
 }
