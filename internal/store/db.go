@@ -3,10 +3,13 @@ package store
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+var ErrNotFound = errors.New("not found")
 
 //go:embed schema.sql
 var schema string

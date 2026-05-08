@@ -32,10 +32,13 @@ func (db *DB) CreateTask(ctx context.Context, t *Task) error {
 }
 
 func (db *DB) UpdateTaskStatus(ctx context.Context, id uuid.UUID, status string) error {
-	_, err := db.pool.Exec(ctx, `
+	tag, err := db.pool.Exec(ctx, `
 		UPDATE tasks SET status = $1, updated_at = NOW() WHERE id = $2`, status, id)
 	if err != nil {
 		return fmt.Errorf("updating task status: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("task %s not found", id)
 	}
 	return nil
 }
