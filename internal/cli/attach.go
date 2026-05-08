@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/sausheong/sidecar/internal/adapter"
 	gitadapter "github.com/sausheong/sidecar/internal/adapter/git"
+	"github.com/sausheong/sidecar/internal/adapter/githubci"
 	"github.com/sausheong/sidecar/internal/adapter/schedule"
 	"github.com/sausheong/sidecar/internal/config"
 	"github.com/sausheong/sidecar/internal/daemon"
@@ -112,6 +113,12 @@ func buildAdapters(repoPath string, cfg *config.Config) []adapter.Adapter {
 			} else {
 				log.Printf("invalid cron %q: %v", sig.Cron, err)
 			}
+		case "github-ci":
+			token := sig.ResolveToken()
+			interval := sig.ParsedPollInterval()
+			adapters = append(adapters, githubci.New(sig.Repo, token, interval, sig.Watch))
+		default:
+			log.Printf("unknown adapter type %q, skipping", sig.Adapter)
 		}
 	}
 	return adapters
