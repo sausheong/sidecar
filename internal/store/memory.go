@@ -126,7 +126,7 @@ func (db *DB) GetTaskEvents(ctx context.Context, taskID uuid.UUID) ([]*TaskEvent
 			return nil, fmt.Errorf("scanning task event: %w", err)
 		}
 		if err := json.Unmarshal(payloadJSON, &ev.Payload); err != nil {
-			ev.Payload = map[string]any{}
+			return nil, fmt.Errorf("unmarshaling task event payload %s: %w", ev.ID, err)
 		}
 		events = append(events, ev)
 	}
