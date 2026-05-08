@@ -21,9 +21,12 @@ type WorkspaceConfig struct {
 }
 
 type SignalConfig struct {
-	Adapter string   `yaml:"adapter"`
-	Watch   []string `yaml:"watch"`
-	Cron    string   `yaml:"cron"`
+	Adapter      string   `yaml:"adapter"`
+	Watch        []string `yaml:"watch"`
+	Cron         string   `yaml:"cron"`
+	Repo         string   `yaml:"repo"`          // owner/repo slug (github-ci adapter)
+	Token        string   `yaml:"token"`         // literal or $ENV_VAR reference
+	PollInterval string   `yaml:"poll_interval"` // e.g. "60s", default "60s"
 }
 
 type AutonomyPolicy struct {

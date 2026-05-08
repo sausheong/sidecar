@@ -6,8 +6,12 @@ signals:
   - adapter: git
     watch: [push, pr]
   - adapter: schedule
-    # 6-field cron with seconds: "s m h dom mon dow"
-    cron: "0 0 2 * * *"
+    cron: "0 0 2 * * *"   # 6-field cron with seconds: nightly at 02:00
+  # - adapter: github-ci
+  #   repo: myorg/my-service
+  #   token: $GITHUB_TOKEN
+  #   poll_interval: 60s
+  #   watch: [failure]
 
 autonomy:
   dependency_updates: auto-commit

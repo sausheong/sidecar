@@ -60,6 +60,31 @@ func TestLoad_MissingFile(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestLoad_GitHubCI(t *testing.T) {
+	yaml := `
+signals:
+  - adapter: github-ci
+    repo: myorg/payment-service
+    token: $GITHUB_TOKEN
+    poll_interval: 60s
+    watch: [failure]
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sidecar.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(yaml), 0644))
+
+	cfg, err := config.Load(path)
+	require.NoError(t, err)
+
+	require.Len(t, cfg.Signals, 1)
+	s := cfg.Signals[0]
+	assert.Equal(t, "github-ci", s.Adapter)
+	assert.Equal(t, "myorg/payment-service", s.Repo)
+	assert.Equal(t, "$GITHUB_TOKEN", s.Token)
+	assert.Equal(t, "60s", s.PollInterval)
+	assert.Equal(t, []string{"failure"}, s.Watch)
+}
+
 func TestAutonomyLevel_Valid(t *testing.T) {
 	cases := []string{"auto-commit", "pull-request", "suggest-only"}
 	for _, c := range cases {
