@@ -119,3 +119,13 @@ func TestTaskEvent_Append(t *testing.T) {
 	err = db.AppendTaskEvent(context.Background(), task.ID, "triage", payload)
 	require.NoError(t, err)
 }
+
+func TestMigrate_MemoryTables(t *testing.T) {
+	db, err := store.Connect(context.Background(), dbURL(t))
+	require.NoError(t, err)
+	defer db.Close()
+
+	// Should succeed and be idempotent
+	require.NoError(t, store.Migrate(context.Background(), db))
+	require.NoError(t, store.Migrate(context.Background(), db))
+}

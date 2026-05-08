@@ -25,3 +25,29 @@ CREATE TABLE IF NOT EXISTS task_events (
     payload    JSONB NOT NULL DEFAULT '{}',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Requires pgvector extension (install with: CREATE EXTENSION IF NOT EXISTS vector)
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- Workspace memory entries — embedded and retrieved by semantic similarity.
+-- Used by Phase 3 to accumulate architectural knowledge, workflow learnings.
+CREATE TABLE IF NOT EXISTS memory_entries (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    workspace_id UUID NOT NULL REFERENCES workspaces(id),
+    category     TEXT NOT NULL,    -- "episodic" | "semantic" | "procedural"
+    content      TEXT NOT NULL,
+    embedding    vector(1536),     -- OpenAI text-embedding-3-small (1536 dims)
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS memory_entries_embedding_idx
+    ON memory_entries USING ivfflat (embedding vector_cosine_ops)
+    WITH (lists = 100);
+
+-- Policy rules — advisory constraints loaded verbatim into triage/plan context.
+CREATE TABLE IF NOT EXISTS policies (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    workspace_id UUID NOT NULL REFERENCES workspaces(id),
+    rule         TEXT NOT NULL,
+    source       TEXT NOT NULL DEFAULT 'yaml',  -- "yaml" | "learned"
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
