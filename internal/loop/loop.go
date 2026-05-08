@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/sausheong/harness/llm"
 	"github.com/sausheong/harness/providers/anthropic"
@@ -17,6 +18,7 @@ import (
 	"github.com/sausheong/sidecar/internal/config"
 	"github.com/sausheong/sidecar/internal/output"
 	"github.com/sausheong/sidecar/internal/store"
+	"github.com/sausheong/sidecar/internal/triage"
 )
 
 // Task status constants.
@@ -25,12 +27,14 @@ const (
 	StatusRunning   = "running"
 	StatusCompleted = "completed"
 	StatusFailed    = "failed"
+	StatusSkipped   = "skipped"   // triage decided no action needed
+	StatusSuggested = "suggested" // suggest-only output, no code committed
 )
 
 // Models holds the resolved model names for each agent role.
 type Models struct {
 	Coding string
-	Triage string // TODO(phase-2): wire to triage step for cheap signal classification
+	Triage string
 }
 
 // ResolveModels returns the effective model names from cfg, falling back to
@@ -73,9 +77,9 @@ func New(db *store.DB, workspace *store.Workspace, cfg *config.Config, repoPath 
 
 // Run executes the improvement loop for the given signal:
 //  1. Creates a Task record in the database.
-//  2. Builds a Harness runtime with file+bash tools.
-//  3. Runs the agent until it finishes (drains the event channel).
-//  4. Commits any filesystem changes to a sidecar/<taskID> branch.
+//  2. Runs triage to decide whether and how to act.
+//  3. Builds a Harness runtime with tools gated by autonomy level.
+//  4. Routes output to suggestion, PR, or auto-commit based on triage result.
 //  5. Updates task status in the database.
 func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 	task := &store.Task{
@@ -87,18 +91,36 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		return fmt.Errorf("creating task: %w", err)
 	}
 
+	// ── Triage ──────────────────────────────────────────────────────────────
+	models := ResolveModels(l.cfg)
+	tr, err := triage.Triage(ctx, l.provider, models.Triage, sig, l.cfg)
+	if err != nil {
+		_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusFailed)
+		return fmt.Errorf("triage: %w", err)
+	}
+	_ = l.db.AppendTaskEvent(ctx, task.ID, "triage", map[string]any{
+		"should_act":     tr.ShouldAct,
+		"change_type":    tr.ChangeType,
+		"autonomy_level": tr.AutonomyLevel,
+		"reason":         tr.Reason,
+	})
+	if !tr.ShouldAct {
+		slog.Info("sidecar skipping signal", "reason", tr.Reason, "task", task.ID)
+		return l.db.UpdateTaskStatus(ctx, task.ID, StatusSkipped)
+	}
+
+	// ── Coding agent ─────────────────────────────────────────────────────────
 	if err := l.db.UpdateTaskStatus(ctx, task.ID, StatusRunning); err != nil {
 		return err
 	}
 
-	models := ResolveModels(l.cfg)
-	systemPrompt := BuildSystemPrompt(sig)
-
 	reg := tool.NewRegistry()
 	reg.Register(&file.ReadFileTool{WorkDir: l.repoPath})
-	reg.Register(&file.WriteFileTool{WorkDir: l.repoPath})
-	reg.Register(&file.EditFileTool{WorkDir: l.repoPath})
-	reg.Register(&bash.BashTool{WorkDir: l.repoPath})
+	if tr.AutonomyLevel != "suggest-only" {
+		reg.Register(&file.WriteFileTool{WorkDir: l.repoPath})
+		reg.Register(&file.EditFileTool{WorkDir: l.repoPath})
+		reg.Register(&bash.BashTool{WorkDir: l.repoPath})
+	}
 
 	rt, err := runtime.BuildRuntime(
 		runtime.RuntimeDeps{},
@@ -112,7 +134,7 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 			Name:         "Sidecar",
 			Model:        models.Coding,
 			Workspace:    l.repoPath,
-			SystemPrompt: systemPrompt,
+			SystemPrompt: BuildSystemPrompt(sig),
 			MaxTurns:     20,
 		},
 	)
@@ -129,9 +151,13 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 	}
 
 	var agentErr error
+	var textBuf strings.Builder
 	for ev := range events {
 		if ev.Type == runtime.EventError {
 			agentErr = ev.Error
+		}
+		if ev.Type == runtime.EventTextDelta {
+			textBuf.WriteString(ev.Text)
 		}
 	}
 	if agentErr != nil {
@@ -139,17 +165,71 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		return fmt.Errorf("agent error: %w", agentErr)
 	}
 
-	out := output.New(l.repoPath)
-	branch, err := out.CommitBranch(task.ID.String(), "sidecar: "+task.Summary)
-	if err != nil {
-		_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusFailed)
-		return err
-	}
+	// ── Output routing ───────────────────────────────────────────────────────
+	switch tr.AutonomyLevel {
+	case "suggest-only":
+		summary := textBuf.String()
+		_ = l.db.AppendTaskEvent(ctx, task.ID, "suggestion", map[string]any{"summary": summary})
+		slog.Info("sidecar suggestion recorded", "task", task.ID, "change_type", tr.ChangeType)
+		return l.db.UpdateTaskStatus(ctx, task.ID, StatusSuggested)
 
-	if branch != "" {
-		slog.Info("sidecar committed changes", "branch", branch, "task", task.ID)
+	case "pull-request":
+		out := output.New(l.repoPath)
+		branch, err := out.CommitBranch(task.ID.String(), "sidecar: "+task.Summary)
+		if err != nil {
+			_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusFailed)
+			return err
+		}
+		if branch == output.BranchNoChanges {
+			slog.Info("sidecar: no changes to commit", "task", task.ID)
+			return l.db.UpdateTaskStatus(ctx, task.ID, StatusCompleted)
+		}
+		repo, token := l.resolveRepoAndToken(sig)
+		if repo != "" {
+			pc := output.NewPRCreator(l.repoPath, repo, token)
+			prURL, prErr := pc.Create(branch, "sidecar: "+task.Summary, l.prBody(sig, tr, task.ID.String()))
+			if prErr != nil {
+				slog.Warn("sidecar PR creation failed", "err", prErr, "branch", branch)
+			} else {
+				_ = l.db.AppendTaskEvent(ctx, task.ID, "pr_created", map[string]any{"url": prURL})
+				slog.Info("sidecar PR created", "url", prURL, "task", task.ID)
+			}
+		}
+		return l.db.UpdateTaskStatus(ctx, task.ID, StatusCompleted)
+
+	default: // "auto-commit"
+		out := output.New(l.repoPath)
+		branch, err := out.CommitBranch(task.ID.String(), "sidecar: "+task.Summary)
+		if err != nil {
+			_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusFailed)
+			return err
+		}
+		if branch != output.BranchNoChanges {
+			slog.Info("sidecar committed changes", "branch", branch, "task", task.ID)
+		}
+		return l.db.UpdateTaskStatus(ctx, task.ID, StatusCompleted)
 	}
-	return l.db.UpdateTaskStatus(ctx, task.ID, StatusCompleted)
+}
+
+// resolveRepoAndToken looks up the repo slug and resolved token for a signal.
+func (l *Loop) resolveRepoAndToken(sig adapter.Signal) (repo, token string) {
+	if r, ok := sig.Payload["repo"].(string); ok && r != "" {
+		repo = r
+	}
+	for _, sc := range l.cfg.Signals {
+		if sc.Repo == repo {
+			token = sc.ResolveToken()
+			return
+		}
+	}
+	token = os.Getenv("GITHUB_TOKEN")
+	return
+}
+
+// prBody generates the PR description.
+func (l *Loop) prBody(sig adapter.Signal, tr triage.TriageResult, taskID string) string {
+	return fmt.Sprintf("## Sidecar automated fix\n\n**Signal:** %s — %s\n**Change type:** %s\n**Task ID:** %s\n\nThis PR was created automatically by Sidecar. Review and merge if the fix looks correct.",
+		string(sig.Type), summarize(sig), tr.ChangeType, taskID)
 }
 
 // BuildSystemPrompt constructs the agent system prompt based on the signal type.
@@ -167,6 +247,20 @@ Only modify files relevant to the current task.`
 A new commit (%s) was just pushed. Review it and fix any immediate issues:
 broken tests, compilation errors, obvious bugs introduced by the change.
 If everything looks good, do nothing.`, base, hash)
+
+	case adapter.SignalCIFailure:
+		workflow, _ := sig.Payload["workflow_name"].(string)
+		sha, _ := sig.Payload["head_sha"].(string)
+		url, _ := sig.Payload["html_url"].(string)
+		return fmt.Sprintf(`%s
+
+A GitHub Actions CI run failed:
+Workflow: %s
+Commit: %s
+Run URL: %s
+
+Investigate why the CI failed. Check recent changes, read failing test output if accessible,
+and fix the root cause. Run tests locally to verify your fix before committing.`, base, workflow, sha, url)
 
 	case adapter.SignalScheduleTick:
 		return fmt.Sprintf(`%s
@@ -194,6 +288,10 @@ func userMessage(sig adapter.Signal) string {
 	case adapter.SignalGitCommit:
 		hash, _ := sig.Payload["hash"].(string)
 		return fmt.Sprintf("New commit detected: %s. Review and fix any issues.", hash)
+	case adapter.SignalCIFailure:
+		workflow, _ := sig.Payload["workflow_name"].(string)
+		sha, _ := sig.Payload["head_sha"].(string)
+		return fmt.Sprintf("CI failure in workflow %q on commit %s. Investigate and fix.", workflow, sha)
 	case adapter.SignalScheduleTick:
 		return "Proactive sweep: identify and apply one meaningful improvement."
 	default:
@@ -214,6 +312,13 @@ func summarize(sig adapter.Signal) string {
 			hash = hash[:8]
 		}
 		return "review commit " + hash
+	case adapter.SignalCIFailure:
+		workflow, _ := sig.Payload["workflow_name"].(string)
+		sha, _ := sig.Payload["head_sha"].(string)
+		if len(sha) > 8 {
+			sha = sha[:8]
+		}
+		return fmt.Sprintf("fix CI failure in %s @ %s", workflow, sha)
 	case adapter.SignalScheduleTick:
 		return "proactive sweep"
 	default:
