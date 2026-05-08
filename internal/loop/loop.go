@@ -239,17 +239,18 @@ func (l *Loop) launchReflect(task *store.Task) {
 	if l.embedding == nil {
 		return
 	}
+	taskCopy := *task // copy before goroutine captures it to avoid future data-race risk
 	go func() {
 		reflectCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
-		events, err := l.db.GetTaskEvents(reflectCtx, task.ID)
+		events, err := l.db.GetTaskEvents(reflectCtx, taskCopy.ID)
 		if err != nil {
-			slog.Warn("reflect: failed to load task events", "err", err, "task", task.ID)
+			slog.Warn("reflect: failed to load task events", "err", err, "task", taskCopy.ID)
 			return
 		}
 		models := ResolveModels(l.cfg)
-		if err := memory.Reflect(reflectCtx, l.embedding, l.provider, models.Triage, l.db, l.workspace, task, events); err != nil {
-			slog.Warn("reflect failed", "err", err, "task", task.ID)
+		if err := memory.Reflect(reflectCtx, l.embedding, l.provider, models.Triage, l.db, l.workspace, &taskCopy, events); err != nil {
+			slog.Warn("reflect failed", "err", err, "task", taskCopy.ID)
 		}
 	}()
 }
