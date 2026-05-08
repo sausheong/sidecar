@@ -3,8 +3,10 @@ package loop
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 
+	"github.com/sausheong/harness/llm"
 	"github.com/sausheong/harness/providers/anthropic"
 	"github.com/sausheong/harness/runtime"
 	"github.com/sausheong/harness/session"
@@ -15,6 +17,14 @@ import (
 	"github.com/sausheong/sidecar/internal/config"
 	"github.com/sausheong/sidecar/internal/output"
 	"github.com/sausheong/sidecar/internal/store"
+)
+
+// Task status constants.
+const (
+	StatusPending   = "pending"
+	StatusRunning   = "running"
+	StatusCompleted = "completed"
+	StatusFailed    = "failed"
 )
 
 // Models holds the resolved model names for each agent role.
@@ -46,11 +56,19 @@ type Loop struct {
 	workspace *store.Workspace
 	cfg       *config.Config
 	repoPath  string
+	provider  llm.LLMProvider
 }
 
 // New constructs a Loop bound to the given database, workspace, config, and repo path.
+// The Anthropic API key is resolved once at construction time.
 func New(db *store.DB, workspace *store.Workspace, cfg *config.Config, repoPath string) *Loop {
-	return &Loop{db: db, workspace: workspace, cfg: cfg, repoPath: repoPath}
+	return &Loop{
+		db:        db,
+		workspace: workspace,
+		cfg:       cfg,
+		repoPath:  repoPath,
+		provider:  anthropic.NewAnthropicProvider(os.Getenv("ANTHROPIC_API_KEY"), ""),
+	}
 }
 
 // Run executes the improvement loop for the given signal:
@@ -69,7 +87,7 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		return fmt.Errorf("creating task: %w", err)
 	}
 
-	if err := l.db.UpdateTaskStatus(ctx, task.ID, "running"); err != nil {
+	if err := l.db.UpdateTaskStatus(ctx, task.ID, StatusRunning); err != nil {
 		return err
 	}
 
@@ -85,7 +103,7 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 	rt, err := runtime.BuildRuntime(
 		runtime.RuntimeDeps{},
 		runtime.RuntimeInputs{
-			Provider: anthropic.NewAnthropicProvider(os.Getenv("ANTHROPIC_API_KEY"), ""),
+			Provider: l.provider,
 			Tools:    reg,
 			Session:  session.NewSession(task.ID.String(), "main"),
 		},
@@ -99,32 +117,39 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		},
 	)
 	if err != nil {
-		_ = l.db.UpdateTaskStatus(ctx, task.ID, "failed")
+		_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusFailed)
 		return fmt.Errorf("building runtime: %w", err)
 	}
 	defer rt.Close()
 
 	events, err := rt.Run(ctx, userMessage(sig), nil)
 	if err != nil {
-		_ = l.db.UpdateTaskStatus(ctx, task.ID, "failed")
+		_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusFailed)
 		return err
 	}
-	for range events {
-		// drain — results are in the filesystem
+
+	var agentErr error
+	for ev := range events {
+		if ev.Type == runtime.EventError {
+			agentErr = ev.Error
+		}
+	}
+	if agentErr != nil {
+		_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusFailed)
+		return fmt.Errorf("agent error: %w", agentErr)
 	}
 
 	out := output.New(l.repoPath)
 	branch, err := out.CommitBranch(task.ID.String(), "sidecar: "+task.Summary)
 	if err != nil {
-		_ = l.db.UpdateTaskStatus(ctx, task.ID, "failed")
+		_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusFailed)
 		return err
 	}
 
-	status := "completed"
 	if branch != "" {
-		status = "committed:" + branch
+		slog.Info("sidecar committed changes", "branch", branch, "task", task.ID)
 	}
-	return l.db.UpdateTaskStatus(ctx, task.ID, status)
+	return l.db.UpdateTaskStatus(ctx, task.ID, StatusCompleted)
 }
 
 // BuildSystemPrompt constructs the agent system prompt based on the signal type.
@@ -173,6 +198,9 @@ func userMessage(sig adapter.Signal) string {
 		return "Proactive sweep: identify and apply one meaningful improvement."
 	default:
 		desc, _ := sig.Payload["description"].(string)
+		if desc == "" {
+			return "Perform a general codebase health check and fix any obvious issues."
+		}
 		return desc
 	}
 }
@@ -190,8 +218,9 @@ func summarize(sig adapter.Signal) string {
 		return "proactive sweep"
 	default:
 		desc, _ := sig.Payload["description"].(string)
-		if len(desc) > 60 {
-			return desc[:60] + "..."
+		runes := []rune(desc)
+		if len(runes) > 60 {
+			return string(runes[:60]) + "..."
 		}
 		return desc
 	}
