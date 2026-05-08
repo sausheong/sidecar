@@ -18,7 +18,7 @@ func TestAttachCmd_RequiresYAML(t *testing.T) {
 	assert.Contains(t, err.Error(), "sidecar.yaml")
 }
 
-func TestAttachCmd_ValidatesGitHubToken_WhenCIAdapterConfigured(t *testing.T) {
+func TestAttachCmd_RequiresDBURL_WhenCIAdapterConfigured(t *testing.T) {
 	dir := t.TempDir()
 	yaml := `
 workspace:

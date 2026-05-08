@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -73,19 +74,54 @@ func (p *PRCreator) DefaultBranch() string {
 }
 
 func (p *PRCreator) pushBranch(branch string) error {
-	// In test mode (non-GitHub base URL) push directly to origin.
-	// In production embed the token in the remote URL for auth.
-	var remoteURL string
-	if p.baseURL == githubAPIBase {
-		remoteURL = fmt.Sprintf("https://x-access-token:%s@github.com/%s.git", p.token, p.repoSlug)
-	} else {
-		remoteURL = "origin"
+	if p.baseURL != githubAPIBase {
+		// Test mode: push to local origin directly (no auth needed).
+		out, err := exec.Command("git", "-C", p.repoPath, "push", "origin", branch).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("git push: %w\n%s", err, out)
+		}
+		return nil
 	}
-	out, err := exec.Command("git", "-C", p.repoPath, "push", remoteURL, branch).CombinedOutput()
+
+	// Production: use GIT_ASKPASS to avoid embedding the token in the process command line.
+	askpass, err := writeTempAskpass(p.token)
 	if err != nil {
+		return fmt.Errorf("creating askpass: %w", err)
+	}
+	defer os.Remove(askpass)
+
+	remoteURL := fmt.Sprintf("https://github.com/%s.git", p.repoSlug)
+	cmd := exec.Command("git", "-C", p.repoPath, "push", remoteURL, branch)
+	cmd.Env = append(os.Environ(),
+		"GIT_ASKPASS="+askpass,
+		"GIT_TERMINAL_PROMPT=0",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git push: %w\n%s", err, out)
 	}
 	return nil
+}
+
+// writeTempAskpass writes a temporary executable script that echoes the token
+// when git asks for a password. Returns the script path.
+func writeTempAskpass(token string) (string, error) {
+	f, err := os.CreateTemp("", "sidecar-askpass-*.sh")
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	// The script echoes the token regardless of which credential field git asks for.
+	script := fmt.Sprintf("#!/bin/sh\necho '%s'\n", token)
+	if _, err := f.WriteString(script); err != nil {
+		os.Remove(f.Name())
+		return "", err
+	}
+	if err := os.Chmod(f.Name(), 0700); err != nil {
+		os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
 }
 
 func (p *PRCreator) createViaGH(branch, base, title, body string) (string, error) {

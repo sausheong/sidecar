@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -75,6 +76,7 @@ func (a *GitHubCIAdapter) Stop() error {
 func (a *GitHubCIAdapter) poll(ctx context.Context, out chan<- adapter.Signal) {
 	runs, err := a.fetchRuns(ctx)
 	if err != nil {
+		slog.Warn("github-ci poll failed", "repo", a.repo, "err", err)
 		return
 	}
 	for _, run := range runs {
