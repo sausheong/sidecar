@@ -69,3 +69,11 @@ func TestStatusConstants(t *testing.T) {
 	assert.Equal(t, "skipped", loop.StatusSkipped)
 	assert.Equal(t, "suggested", loop.StatusSuggested)
 }
+
+func TestLoop_MemoryNilSafe(t *testing.T) {
+	// ResolveModels should work regardless of embedding provider
+	cfg := &config.Config{}
+	models := loop.ResolveModels(cfg)
+	assert.NotEmpty(t, models.Coding)
+	assert.NotEmpty(t, models.Triage)
+}

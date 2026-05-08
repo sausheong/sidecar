@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/sausheong/harness/llm"
 	"github.com/sausheong/harness/providers/anthropic"
@@ -16,6 +17,7 @@ import (
 	"github.com/sausheong/harness/tools/file"
 	"github.com/sausheong/sidecar/internal/adapter"
 	"github.com/sausheong/sidecar/internal/config"
+	"github.com/sausheong/sidecar/internal/memory"
 	"github.com/sausheong/sidecar/internal/output"
 	"github.com/sausheong/sidecar/internal/store"
 	"github.com/sausheong/sidecar/internal/triage"
@@ -61,17 +63,18 @@ type Loop struct {
 	cfg       *config.Config
 	repoPath  string
 	provider  llm.LLMProvider
+	embedding memory.EmbeddingProvider // nil when memory is not configured
 }
 
-// New constructs a Loop bound to the given database, workspace, config, and repo path.
-// The Anthropic API key is resolved once at construction time.
-func New(db *store.DB, workspace *store.Workspace, cfg *config.Config, repoPath string) *Loop {
+// New constructs a Loop. Pass nil for embedding to disable memory retrieval and reflect.
+func New(db *store.DB, workspace *store.Workspace, cfg *config.Config, repoPath string, embedding memory.EmbeddingProvider) *Loop {
 	return &Loop{
 		db:        db,
 		workspace: workspace,
 		cfg:       cfg,
 		repoPath:  repoPath,
 		provider:  anthropic.NewAnthropicProvider(os.Getenv("ANTHROPIC_API_KEY"), ""),
+		embedding: embedding,
 	}
 }
 
@@ -109,6 +112,17 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		return l.db.UpdateTaskStatus(ctx, task.ID, StatusSkipped)
 	}
 
+	// ── Memory retrieval ─────────────────────────────────────────────────────────
+	var memoryBlock string
+	if l.embedding != nil {
+		block, mErr := memory.Retrieve(ctx, l.embedding, l.db, l.workspace, task.Summary, 5)
+		if mErr != nil {
+			slog.Warn("memory retrieval failed", "err", mErr, "task", task.ID)
+		} else {
+			memoryBlock = block
+		}
+	}
+
 	// ── Coding agent ─────────────────────────────────────────────────────────
 	if err := l.db.UpdateTaskStatus(ctx, task.ID, StatusRunning); err != nil {
 		return err
@@ -120,6 +134,11 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		reg.Register(&file.WriteFileTool{WorkDir: l.repoPath})
 		reg.Register(&file.EditFileTool{WorkDir: l.repoPath})
 		reg.Register(&bash.BashTool{WorkDir: l.repoPath})
+	}
+
+	systemPrompt := BuildSystemPrompt(sig)
+	if memoryBlock != "" {
+		systemPrompt = memoryBlock + "\n\n" + systemPrompt
 	}
 
 	rt, err := runtime.BuildRuntime(
@@ -134,7 +153,7 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 			Name:         "Sidecar",
 			Model:        models.Coding,
 			Workspace:    l.repoPath,
-			SystemPrompt: BuildSystemPrompt(sig),
+			SystemPrompt: systemPrompt,
 			MaxTurns:     20,
 		},
 	)
@@ -171,6 +190,7 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		summary := textBuf.String()
 		_ = l.db.AppendTaskEvent(ctx, task.ID, "suggestion", map[string]any{"summary": summary})
 		slog.Info("sidecar suggestion recorded", "task", task.ID, "change_type", tr.ChangeType)
+		l.launchReflect(task)
 		return l.db.UpdateTaskStatus(ctx, task.ID, StatusSuggested)
 
 	case "pull-request":
@@ -182,6 +202,7 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		}
 		if branch == output.BranchNoChanges {
 			slog.Info("sidecar: no changes to commit", "task", task.ID)
+			l.launchReflect(task)
 			return l.db.UpdateTaskStatus(ctx, task.ID, StatusCompleted)
 		}
 		repo, token := l.resolveRepoAndToken(sig)
@@ -195,6 +216,7 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 				slog.Info("sidecar PR created", "url", prURL, "task", task.ID)
 			}
 		}
+		l.launchReflect(task)
 		return l.db.UpdateTaskStatus(ctx, task.ID, StatusCompleted)
 
 	default: // "auto-commit"
@@ -207,8 +229,29 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		if branch != output.BranchNoChanges {
 			slog.Info("sidecar committed changes", "branch", branch, "task", task.ID)
 		}
+		l.launchReflect(task)
 		return l.db.UpdateTaskStatus(ctx, task.ID, StatusCompleted)
 	}
+}
+
+// launchReflect starts an async goroutine to extract memory from a completed task.
+func (l *Loop) launchReflect(task *store.Task) {
+	if l.embedding == nil {
+		return
+	}
+	go func() {
+		reflectCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		events, err := l.db.GetTaskEvents(reflectCtx, task.ID)
+		if err != nil {
+			slog.Warn("reflect: failed to load task events", "err", err, "task", task.ID)
+			return
+		}
+		models := ResolveModels(l.cfg)
+		if err := memory.Reflect(reflectCtx, l.embedding, l.provider, models.Triage, l.db, l.workspace, task, events); err != nil {
+			slog.Warn("reflect failed", "err", err, "task", task.ID)
+		}
+	}()
 }
 
 // resolveRepoAndToken looks up the repo slug and resolved token for a signal.
