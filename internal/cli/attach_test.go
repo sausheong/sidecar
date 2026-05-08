@@ -41,3 +41,25 @@ autonomy:
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "SIDECAR_DB_URL")
 }
+
+func TestAttachCmd_MemoryDisabledWithoutEmbeddingConfig(t *testing.T) {
+	dir := t.TempDir()
+	yaml := `
+workspace:
+  name: test
+signals:
+  - adapter: git
+    watch: [push]
+autonomy:
+  test_fixes: auto-commit
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sidecar.yaml"), []byte(yaml), 0644))
+
+	t.Setenv("SIDECAR_DB_URL", "")
+	root := cli.RootCmd()
+	root.SetArgs([]string{"attach", dir})
+	err := root.Execute()
+	// Should fail on SIDECAR_DB_URL, not on embedding config
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "SIDECAR_DB_URL")
+}

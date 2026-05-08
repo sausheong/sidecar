@@ -83,7 +83,7 @@ func taskCmd() *cobra.Command {
 				},
 			}
 
-			l := loop.New(db, ws, cfg, abs)
+			l := loop.New(db, ws, cfg, abs, buildEmbeddingProvider(cfg))
 			log.Printf("Running task: %s", description)
 			return l.Run(ctx, sig)
 		},

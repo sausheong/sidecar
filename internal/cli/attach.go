@@ -81,7 +81,7 @@ func attachCmd() *cobra.Command {
 			}
 
 			adapters := buildAdapters(abs, cfg)
-			l := loop.New(db, ws, cfg, abs)
+			l := loop.New(db, ws, cfg, abs, buildEmbeddingProvider(cfg))
 			d := daemon.New(adapters, l.Run)
 
 			if err := d.Start(ctx); err != nil {
