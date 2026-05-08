@@ -4,6 +4,7 @@ import (
 	"context"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sausheong/sidecar/internal/adapter"
@@ -14,6 +15,7 @@ type GitAdapter struct {
 	PollInterval time.Duration
 	lastSeen     string
 	stopCh       chan struct{}
+	stopOnce     sync.Once
 }
 
 func New(repoPath string) *GitAdapter {
@@ -50,7 +52,7 @@ func (g *GitAdapter) Start(ctx context.Context, out chan<- adapter.Signal) error
 }
 
 func (g *GitAdapter) Stop() error {
-	close(g.stopCh)
+	g.stopOnce.Do(func() { close(g.stopCh) })
 	return nil
 }
 
@@ -69,15 +71,15 @@ func (g *GitAdapter) poll(out chan<- adapter.Signal) {
 			},
 		}
 	}
-	g.lastSeen = commits[0]
+	g.lastSeen = commits[len(commits)-1]
 }
 
 func (g *GitAdapter) newCommits() ([]string, error) {
 	var args []string
 	if g.lastSeen == "" {
-		args = []string{"-C", g.RepoPath, "log", "--format=%H", "-1"}
+		args = []string{"-C", g.RepoPath, "log", "--format=%H", "--reverse", "-1"}
 	} else {
-		args = []string{"-C", g.RepoPath, "log", "--format=%H", g.lastSeen + "..HEAD"}
+		args = []string{"-C", g.RepoPath, "log", "--format=%H", "--reverse", g.lastSeen + "..HEAD"}
 	}
 	out, err := exec.Command("git", args...).Output()
 	if err != nil {

@@ -50,3 +50,19 @@ func TestCommitBranch_WithChanges(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(out), "sidecar: applied fix")
 }
+
+func TestCommitBranch_Idempotent(t *testing.T) {
+	dir := initRepo(t)
+	o := output.New(dir)
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "fix.txt"), []byte("patched"), 0644))
+	branch1, err := o.CommitBranch("task-idem", "sidecar: first")
+	require.NoError(t, err)
+	assert.Equal(t, "sidecar/task-idem", branch1)
+
+	// Second call with same taskID and new changes should not panic or error
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "fix2.txt"), []byte("more"), 0644))
+	branch2, err := o.CommitBranch("task-idem", "sidecar: second")
+	require.NoError(t, err)
+	assert.Equal(t, "sidecar/task-idem", branch2)
+}

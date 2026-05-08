@@ -63,6 +63,18 @@ func TestGitAdapter_DetectsNewCommit(t *testing.T) {
 	assert.Equal(t, dir, sig.Payload["repo"])
 }
 
+func TestGitAdapter_DoubleStop(t *testing.T) {
+	dir := initRepo(t)
+	a := gitadapter.New(dir)
+	ctx := context.Background()
+	signals := make(chan adapter.Signal, 1)
+	require.NoError(t, a.Start(ctx, signals))
+	assert.NotPanics(t, func() {
+		a.Stop()
+		a.Stop()
+	})
+}
+
 func TestGitAdapter_NoDuplicates(t *testing.T) {
 	dir := initRepo(t)
 	addCommit(t, dir, "pre-existing commit")

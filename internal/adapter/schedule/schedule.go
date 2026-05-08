@@ -44,7 +44,7 @@ func (s *ScheduleAdapter) Start(ctx context.Context, out chan<- adapter.Signal) 
 
 func (s *ScheduleAdapter) Stop() error {
 	if s.c != nil {
-		s.c.Stop()
+		<-s.c.Stop().Done()
 	}
 	return nil
 }

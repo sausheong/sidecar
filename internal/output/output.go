@@ -27,7 +27,7 @@ func (o *Output) CommitBranch(taskID, message string) (string, error) {
 
 	branch := "sidecar/" + taskID
 	cmds := [][]string{
-		{"git", "-C", o.repoPath, "checkout", "-b", branch},
+		{"git", "-C", o.repoPath, "checkout", "-B", branch},
 		{"git", "-C", o.repoPath, "add", "-A"},
 		{"git", "-C", o.repoPath, "commit", "-m", message},
 		{"git", "-C", o.repoPath, "checkout", "-"},
