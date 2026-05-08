@@ -109,7 +109,10 @@ func (p *PRCreator) createViaAPI(branch, base, title, body string) (string, erro
 		"head":  branch,
 		"base":  base,
 	}
-	data, _ := json.Marshal(payload)
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("marshalling pr payload: %w", err)
+	}
 
 	url := fmt.Sprintf("%s/repos/%s/pulls", p.baseURL, p.repoSlug)
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(data))
