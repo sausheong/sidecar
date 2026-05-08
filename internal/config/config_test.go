@@ -107,3 +107,31 @@ func TestSignalConfig_ResolveToken(t *testing.T) {
 	assert.Equal(t, "literal-token", config.SignalConfig{Token: "literal-token"}.ResolveToken()) // literal
 	assert.Equal(t, "", config.SignalConfig{Token: ""}.ResolveToken())                           // empty
 }
+
+func TestLoad_Embedding(t *testing.T) {
+	yaml := `
+embedding:
+  provider: openai
+  model: text-embedding-3-small
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sidecar.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(yaml), 0644))
+
+	cfg, err := config.Load(path)
+	require.NoError(t, err)
+
+	assert.Equal(t, "openai", cfg.Embedding.Provider)
+	assert.Equal(t, "text-embedding-3-small", cfg.Embedding.Model)
+}
+
+func TestLoad_Embedding_Empty(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sidecar.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("workspace:\n  name: test\n"), 0644))
+
+	cfg, err := config.Load(path)
+	require.NoError(t, err)
+
+	assert.Equal(t, "", cfg.Embedding.Provider)
+}

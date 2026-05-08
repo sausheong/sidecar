@@ -14,6 +14,12 @@ type Config struct {
 	Autonomy  AutonomyPolicy  `yaml:"autonomy"`
 	Models    ModelConfig     `yaml:"models"`
 	Scope     ScopeConfig     `yaml:"scope"`
+	Embedding EmbeddingConfig `yaml:"embedding"`
+}
+
+type EmbeddingConfig struct {
+	Provider string `yaml:"provider"` // "openai" | "voyage"; empty = disabled
+	Model    string `yaml:"model"`    // optional; uses provider default if empty
 }
 
 type WorkspaceConfig struct {
