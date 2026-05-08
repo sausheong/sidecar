@@ -62,13 +62,17 @@ func (g *GitAdapter) poll(out chan<- adapter.Signal) {
 		return
 	}
 	for _, hash := range commits {
-		out <- adapter.Signal{
+		select {
+		case <-g.stopCh:
+			return
+		case out <- adapter.Signal{
 			Type:   adapter.SignalGitCommit,
 			Source: "git",
 			Payload: map[string]any{
 				"hash": hash,
 				"repo": g.RepoPath,
 			},
+		}:
 		}
 	}
 	g.lastSeen = commits[len(commits)-1]

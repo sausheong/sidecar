@@ -6,7 +6,8 @@ signals:
   - adapter: git
     watch: [push, pr]
   - adapter: schedule
-    cron: "0 2 * * *"
+    # 6-field cron with seconds: "s m h dom mon dow"
+    cron: "0 0 2 * * *"
 
 autonomy:
   dependency_updates: auto-commit

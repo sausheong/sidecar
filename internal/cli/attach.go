@@ -46,6 +46,10 @@ func attachCmd() *cobra.Command {
 				return fmt.Errorf("SIDECAR_DB_URL environment variable is required")
 			}
 
+			if os.Getenv("ANTHROPIC_API_KEY") == "" {
+				return fmt.Errorf("ANTHROPIC_API_KEY environment variable is required")
+			}
+
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 

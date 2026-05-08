@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- task_events records each action taken during a task run.
+-- Used by Phase 3 workspace memory to build episodic knowledge.
 CREATE TABLE IF NOT EXISTS task_events (
     id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     task_id    UUID NOT NULL REFERENCES tasks(id),

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -37,6 +38,10 @@ func taskCmd() *cobra.Command {
 				return fmt.Errorf("SIDECAR_DB_URL environment variable is required")
 			}
 
+			if os.Getenv("ANTHROPIC_API_KEY") == "" {
+				return fmt.Errorf("ANTHROPIC_API_KEY environment variable is required")
+			}
+
 			ctx := context.Background()
 			db, err := store.Connect(ctx, dbURL)
 			if err != nil {
@@ -54,13 +59,20 @@ func taskCmd() *cobra.Command {
 				cfg = &config.Config{}
 			}
 
-			ws := &store.Workspace{
-				Name:       filepath.Base(abs),
-				Path:       abs,
-				ConfigHash: "",
-			}
-			if err := db.UpsertWorkspace(ctx, ws); err != nil {
-				return err
+			ws, err := db.GetWorkspaceByPath(ctx, abs)
+			if err != nil {
+				if !errors.Is(err, store.ErrNotFound) {
+					return fmt.Errorf("looking up workspace: %w", err)
+				}
+				// workspace doesn't exist yet — create it
+				ws = &store.Workspace{
+					Name:       filepath.Base(abs),
+					Path:       abs,
+					ConfigHash: "",
+				}
+				if err := db.UpsertWorkspace(ctx, ws); err != nil {
+					return err
+				}
 			}
 
 			sig := adapter.Signal{

@@ -30,7 +30,7 @@ const (
 // Models holds the resolved model names for each agent role.
 type Models struct {
 	Coding string
-	Triage string
+	Triage string // TODO(phase-2): wire to triage step for cheap signal classification
 }
 
 // ResolveModels returns the effective model names from cfg, falling back to

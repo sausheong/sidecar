@@ -34,7 +34,7 @@ func (o *Output) CommitBranch(taskID, message string) (string, error) {
 	}
 	for _, args := range cmds {
 		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
-			return "", fmt.Errorf("git %s: %w\n%s", args[2], err, out)
+			return "", fmt.Errorf("git %s: %w\n%s", args[3], err, out)
 		}
 	}
 	return branch, nil

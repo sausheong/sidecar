@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"log"
+	"sync"
 
 	"github.com/sausheong/sidecar/internal/adapter"
 )
@@ -14,6 +15,7 @@ type Daemon struct {
 	handler  Handler
 	signals  chan adapter.Signal
 	done     chan struct{}
+	stopOnce sync.Once
 }
 
 func New(adapters []adapter.Adapter, handler Handler) *Daemon {
@@ -41,7 +43,7 @@ func (d *Daemon) Stop() {
 			log.Printf("stopping adapter %s: %v", a.Name(), err)
 		}
 	}
-	close(d.done)
+	d.stopOnce.Do(func() { close(d.done) })
 }
 
 func (d *Daemon) run(ctx context.Context) {
