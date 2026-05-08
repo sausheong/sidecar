@@ -50,13 +50,14 @@ func taskCmd() *cobra.Command {
 
 			cfg, err := config.Load(filepath.Join(abs, "sidecar.yaml"))
 			if err != nil {
+				log.Printf("warning: no sidecar.yaml at %s, using defaults", abs)
 				cfg = &config.Config{}
 			}
 
 			ws := &store.Workspace{
 				Name:       filepath.Base(abs),
 				Path:       abs,
-				ConfigHash: "none",
+				ConfigHash: "",
 			}
 			if err := db.UpsertWorkspace(ctx, ws); err != nil {
 				return err

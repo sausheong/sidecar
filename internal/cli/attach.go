@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"log"
 	"os"
@@ -58,10 +59,17 @@ func attachCmd() *cobra.Command {
 				return fmt.Errorf("running migrations: %w", err)
 			}
 
+			configData, err := os.ReadFile(cfgPath)
+			if err != nil {
+				return fmt.Errorf("reading config for hash: %w", err)
+			}
+			hash := sha256.Sum256(configData)
+			configHash := fmt.Sprintf("%x", hash[:8])
+
 			ws := &store.Workspace{
 				Name:       cfg.Workspace.Name,
 				Path:       abs,
-				ConfigHash: cfgPath,
+				ConfigHash: configHash,
 			}
 			if err := db.UpsertWorkspace(ctx, ws); err != nil {
 				return fmt.Errorf("upserting workspace: %w", err)

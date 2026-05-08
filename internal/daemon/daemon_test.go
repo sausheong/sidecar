@@ -2,6 +2,7 @@ package daemon_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -32,9 +33,16 @@ func (f *fakeAdapter) Start(ctx context.Context, out chan<- adapter.Signal) erro
 }
 
 func TestDaemon_RoutesSignals(t *testing.T) {
+	var mu sync.Mutex
 	received := make([]adapter.Signal, 0)
+	var wg sync.WaitGroup
+	wg.Add(2)
+
 	handler := func(ctx context.Context, sig adapter.Signal) error {
+		mu.Lock()
 		received = append(received, sig)
+		mu.Unlock()
+		wg.Done()
 		return nil
 	}
 
@@ -46,11 +54,11 @@ func TestDaemon_RoutesSignals(t *testing.T) {
 	}
 
 	d := daemon.New(adapters, handler)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	require.NoError(t, d.Start(ctx))
-	time.Sleep(200 * time.Millisecond)
+	wg.Wait()
 	d.Stop()
 
 	assert.Len(t, received, 2)

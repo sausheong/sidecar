@@ -45,7 +45,7 @@ func statusCmd() *cobra.Command {
 
 			tasks, err := db.ListTasks(ctx, ws.ID, 20)
 			if err != nil {
-				return err
+				return fmt.Errorf("listing tasks: %w", err)
 			}
 
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
