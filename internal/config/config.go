@@ -55,14 +55,17 @@ func ValidAutonomyLevel(s string) bool {
 	return validAutonomyLevels[s]
 }
 
+// Load reads and parses the YAML config at path. It is intentionally permissive:
+// it does not validate field values. Callers that need to validate autonomy levels
+// must call ValidAutonomyLevel separately.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("reading sidecar.yaml: %w", err)
+		return nil, fmt.Errorf("reading config %q: %w", path, err)
 	}
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parsing sidecar.yaml: %w", err)
+		return nil, fmt.Errorf("parsing config %q: %w", path, err)
 	}
 	return &cfg, nil
 }
