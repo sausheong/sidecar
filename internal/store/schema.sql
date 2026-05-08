@@ -42,6 +42,8 @@ CREATE TABLE IF NOT EXISTS memory_entries (
 CREATE INDEX IF NOT EXISTS memory_entries_embedding_idx
     ON memory_entries USING ivfflat (embedding vector_cosine_ops)
     WITH (lists = 100);
+CREATE INDEX IF NOT EXISTS memory_entries_workspace_idx
+    ON memory_entries (workspace_id);
 
 -- Policy rules — advisory constraints loaded verbatim into triage/plan context.
 CREATE TABLE IF NOT EXISTS policies (
@@ -51,3 +53,5 @@ CREATE TABLE IF NOT EXISTS policies (
     source       TEXT NOT NULL DEFAULT 'yaml',  -- "yaml" | "learned"
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+CREATE INDEX IF NOT EXISTS policies_workspace_idx
+    ON policies (workspace_id);

@@ -129,3 +129,64 @@ func TestMigrate_MemoryTables(t *testing.T) {
 	require.NoError(t, store.Migrate(context.Background(), db))
 	require.NoError(t, store.Migrate(context.Background(), db))
 }
+
+func TestStoreMemory_AndSearch(t *testing.T) {
+	db, err := store.Connect(context.Background(), dbURL(t))
+	require.NoError(t, err)
+	defer db.Close()
+	require.NoError(t, store.Migrate(context.Background(), db))
+
+	ws := &store.Workspace{Name: "mem-test", Path: t.TempDir(), ConfigHash: "x"}
+	require.NoError(t, db.UpsertWorkspace(context.Background(), ws))
+
+	embedding := make([]float32, 1536)
+	embedding[0] = 1.0
+	err = db.StoreMemory(context.Background(), ws.ID, "semantic", "auth uses interface mocking", embedding)
+	require.NoError(t, err)
+
+	results, err := db.SearchMemory(context.Background(), ws.ID, []string{"semantic", "procedural"}, embedding, 5)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "semantic", results[0].Category)
+	assert.Equal(t, "auth uses interface mocking", results[0].Content)
+	assert.Greater(t, results[0].Similarity, 0.9)
+}
+
+func TestStorePolicy_AndGet(t *testing.T) {
+	db, err := store.Connect(context.Background(), dbURL(t))
+	require.NoError(t, err)
+	defer db.Close()
+	require.NoError(t, store.Migrate(context.Background(), db))
+
+	ws := &store.Workspace{Name: "pol-test", Path: t.TempDir(), ConfigHash: "x"}
+	require.NoError(t, db.UpsertWorkspace(context.Background(), ws))
+
+	require.NoError(t, db.StorePolicy(context.Background(), ws.ID, "prefer explicit error handling", "yaml"))
+	require.NoError(t, db.StorePolicy(context.Background(), ws.ID, "never touch secrets/", "yaml"))
+
+	policies, err := db.GetPolicies(context.Background(), ws.ID)
+	require.NoError(t, err)
+	assert.Len(t, policies, 2)
+	assert.Contains(t, policies, "prefer explicit error handling")
+}
+
+func TestGetTaskEvents(t *testing.T) {
+	db, err := store.Connect(context.Background(), dbURL(t))
+	require.NoError(t, err)
+	defer db.Close()
+	require.NoError(t, store.Migrate(context.Background(), db))
+
+	ws := &store.Workspace{Name: "evt-read-test", Path: t.TempDir(), ConfigHash: "x"}
+	require.NoError(t, db.UpsertWorkspace(context.Background(), ws))
+
+	task := &store.Task{WorkspaceID: ws.ID, SignalType: "git.commit", Summary: "test"}
+	require.NoError(t, db.CreateTask(context.Background(), task))
+	require.NoError(t, db.AppendTaskEvent(context.Background(), task.ID, "triage",
+		map[string]any{"should_act": true, "change_type": "bug_fix"}))
+
+	events, err := db.GetTaskEvents(context.Background(), task.ID)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	assert.Equal(t, "triage", events[0].Type)
+	assert.Equal(t, true, events[0].Payload["should_act"])
+}
