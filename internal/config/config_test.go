@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/sausheong/sidecar/internal/config"
 	"github.com/stretchr/testify/assert"
@@ -91,4 +92,18 @@ func TestAutonomyLevel_Valid(t *testing.T) {
 		assert.True(t, config.ValidAutonomyLevel(c), "expected %q to be valid", c)
 	}
 	assert.False(t, config.ValidAutonomyLevel("invalid"))
+}
+
+func TestSignalConfig_ParsedPollInterval(t *testing.T) {
+	assert.Equal(t, 60*time.Second, config.SignalConfig{}.ParsedPollInterval())                        // empty → default
+	assert.Equal(t, 30*time.Second, config.SignalConfig{PollInterval: "30s"}.ParsedPollInterval())     // valid
+	assert.Equal(t, 60*time.Second, config.SignalConfig{PollInterval: "invalid"}.ParsedPollInterval()) // bad → default
+	assert.Equal(t, 60*time.Second, config.SignalConfig{PollInterval: "-5s"}.ParsedPollInterval())     // negative → default
+}
+
+func TestSignalConfig_ResolveToken(t *testing.T) {
+	t.Setenv("MY_TEST_TOKEN", "secret123")
+	assert.Equal(t, "secret123", config.SignalConfig{Token: "$MY_TEST_TOKEN"}.ResolveToken()) // env var
+	assert.Equal(t, "literal-token", config.SignalConfig{Token: "literal-token"}.ResolveToken()) // literal
+	assert.Equal(t, "", config.SignalConfig{Token: ""}.ResolveToken())                           // empty
 }

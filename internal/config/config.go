@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -46,6 +47,29 @@ type ModelConfig struct {
 type ScopeConfig struct {
 	Include []string `yaml:"include"`
 	Exclude []string `yaml:"exclude"`
+}
+
+// ParsedPollInterval returns the poll interval as a time.Duration.
+// Returns 60 seconds if PollInterval is empty or unparseable.
+func (s SignalConfig) ParsedPollInterval() time.Duration {
+	if s.PollInterval == "" {
+		return 60 * time.Second
+	}
+	d, err := time.ParseDuration(s.PollInterval)
+	if err != nil || d <= 0 {
+		return 60 * time.Second
+	}
+	return d
+}
+
+// ResolveToken returns the resolved token value.
+// If Token starts with "$", it is treated as an environment variable name
+// and resolved via os.Getenv. Otherwise the literal value is returned.
+func (s SignalConfig) ResolveToken() string {
+	if len(s.Token) > 0 && s.Token[0] == '$' {
+		return os.Getenv(s.Token[1:])
+	}
+	return s.Token
 }
 
 var validAutonomyLevels = map[string]bool{
