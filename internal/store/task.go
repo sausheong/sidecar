@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -65,4 +66,22 @@ func (db *DB) ListTasks(ctx context.Context, workspaceID uuid.UUID, limit int) (
 		tasks = append(tasks, t)
 	}
 	return tasks, rows.Err()
+}
+
+// AppendTaskEvent records a single event for a task in the task_events table.
+// payload is marshaled to JSONB.
+func (db *DB) AppendTaskEvent(ctx context.Context, taskID uuid.UUID, eventType string, payload map[string]any) error {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshaling event payload: %w", err)
+	}
+	_, err = db.pool.Exec(ctx, `
+		INSERT INTO task_events (task_id, type, payload)
+		VALUES ($1, $2, $3)`,
+		taskID, eventType, data,
+	)
+	if err != nil {
+		return fmt.Errorf("appending task event: %w", err)
+	}
+	return nil
 }

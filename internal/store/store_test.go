@@ -102,3 +102,20 @@ func TestTask_CreateAndList(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "completed", tasks[0].Status)
 }
+
+func TestTaskEvent_Append(t *testing.T) {
+	db, err := store.Connect(context.Background(), dbURL(t))
+	require.NoError(t, err)
+	defer db.Close()
+	require.NoError(t, store.Migrate(context.Background(), db))
+
+	ws := &store.Workspace{Name: "evt-svc", Path: t.TempDir(), ConfigHash: "x"}
+	require.NoError(t, db.UpsertWorkspace(context.Background(), ws))
+
+	task := &store.Task{WorkspaceID: ws.ID, SignalType: "ci.failure", Summary: "test"}
+	require.NoError(t, db.CreateTask(context.Background(), task))
+
+	payload := map[string]any{"should_act": true, "change_type": "test_fix", "reason": "tests failing"}
+	err = db.AppendTaskEvent(context.Background(), task.ID, "triage", payload)
+	require.NoError(t, err)
+}
