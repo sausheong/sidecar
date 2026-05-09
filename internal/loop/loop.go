@@ -223,7 +223,6 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		_ = l.db.AppendTaskEvent(ctx, task.ID, "suggestion", map[string]any{"summary": summary})
 		slog.Info("sidecar suggestion recorded", "task", task.ID, "change_type", tr.ChangeType)
 		task.Status = StatusSuggested
-		l.launchReflect(task)
 		return l.db.UpdateTaskStatus(ctx, task.ID, StatusSuggested)
 
 	case "pull-request":
@@ -236,7 +235,6 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		if branch == output.BranchNoChanges {
 			slog.Info("sidecar: no changes to commit", "task", task.ID)
 			task.Status = StatusCompleted
-			l.launchReflect(task)
 			return l.db.UpdateTaskStatus(ctx, task.ID, StatusCompleted)
 		}
 		repo, token := l.resolveRepoAndToken(sig)
@@ -251,7 +249,6 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 			}
 		}
 		task.Status = StatusCompleted
-		l.launchReflect(task)
 		return l.db.UpdateTaskStatus(ctx, task.ID, StatusCompleted)
 
 	default: // "auto-commit"
@@ -265,7 +262,6 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 			slog.Info("sidecar committed changes", "branch", branch, "task", task.ID)
 		}
 		task.Status = StatusCompleted
-		l.launchReflect(task)
 		return l.db.UpdateTaskStatus(ctx, task.ID, StatusCompleted)
 	}
 }
@@ -301,27 +297,6 @@ func (l *Loop) runReview(parent *runtime.Runtime, task store.Task) {
 		return
 	}
 	slog.Info("review completed", "task", task.ID, "actions", len(res.Actions))
-}
-
-// launchReflect starts an async goroutine to extract memory from a completed task.
-func (l *Loop) launchReflect(task *store.Task) {
-	if l.embedding == nil {
-		return
-	}
-	taskCopy := *task // copy before goroutine captures it to avoid future data-race risk
-	go func() {
-		reflectCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cancel()
-		events, err := l.db.GetTaskEvents(reflectCtx, taskCopy.ID)
-		if err != nil {
-			slog.Warn("reflect: failed to load task events", "err", err, "task", taskCopy.ID)
-			return
-		}
-		models := ResolveModels(l.cfg)
-		if err := memory.Reflect(reflectCtx, l.embedding, l.provider, models.Triage, l.db, l.workspace, &taskCopy, events); err != nil {
-			slog.Warn("reflect failed", "err", err, "task", taskCopy.ID)
-		}
-	}()
 }
 
 // resolveRepoAndToken looks up the repo slug and resolved token for a signal.
