@@ -19,7 +19,7 @@ import (
 // TriageResult is the structured output of the triage agent.
 type TriageResult struct {
 	ShouldAct     bool   // false = skip this signal entirely
-	ChangeType    string // "test_fix" | "bug_fix" | "dependency_update" | "refactor" | "log_fix" | "unknown"
+	ChangeType    string // "test_fix" | "bug_fix" | "dependency_update" | "refactor" | "log_fix" | "metric_fix" | "unknown"
 	AutonomyLevel string // "auto-commit" | "pull-request" | "suggest-only"
 	Reason        string // one-sentence explanation
 }
@@ -29,7 +29,7 @@ Analyze the incoming signal and decide:
 1. Whether it warrants autonomous action (should_act: true/false)
 2. If so, what type of change is needed
 
-Valid change_type values: "test_fix", "bug_fix", "dependency_update", "refactor", "log_fix", "unknown"
+Valid change_type values: "test_fix", "bug_fix", "dependency_update", "refactor", "log_fix", "metric_fix", "unknown"
 
 Do NOT act (should_act: false) for:
 - CI failures caused by infrastructure issues (network timeouts, disk full, runner unavailable)
@@ -109,6 +109,12 @@ func BuildTriageMessage(sig adapter.Signal) string {
 		line, _ := sig.Payload["line"].(string)
 		return fmt.Sprintf("Log anomaly detected:\nPattern: %s\nSource: %s\nSample: %s\n\nShould this be investigated and fixed automatically?",
 			pattern, source, line)
+	case adapter.SignalMetricAlert:
+		name, _ := sig.Payload["alert_name"].(string)
+		message, _ := sig.Payload["message"].(string)
+		provider, _ := sig.Payload["provider"].(string)
+		return fmt.Sprintf("Metrics alert fired in %s:\nAlert: %s\nDetails: %s\n\nShould this be investigated and fixed automatically?",
+			provider, name, message)
 	default:
 		desc, _ := sig.Payload["description"].(string)
 		return fmt.Sprintf("On-demand task: %s\nShould this task be executed?", desc)
@@ -148,6 +154,8 @@ func ResolveAutonomy(changeType string, cfg *config.Config) string {
 		level = cfg.Autonomy.Refactoring
 	case "log_fix":
 		level = cfg.Autonomy.LogFixes
+	case "metric_fix":
+		level = cfg.Autonomy.MetricFixes
 	}
 	if level == "" {
 		return "suggest-only"

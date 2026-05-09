@@ -102,3 +102,34 @@ func TestResolveAutonomy_LogFix(t *testing.T) {
 	}
 	assert.Equal(t, "suggest-only", triage.ResolveAutonomy("log_fix", cfg))
 }
+
+func TestBuildTriageMessage_MetricAlert(t *testing.T) {
+	sig := adapter.Signal{
+		Type:   adapter.SignalMetricAlert,
+		Source: "metrics",
+		Payload: map[string]any{
+			"alert_id":   "1001",
+			"alert_name": "High Error Rate",
+			"message":    "errors > 5%",
+			"provider":   "datadog",
+		},
+	}
+	msg := triage.BuildTriageMessage(sig)
+	assert.Contains(t, msg, "High Error Rate")
+	assert.Contains(t, msg, "errors > 5%")
+	assert.Contains(t, msg, "datadog")
+}
+
+func TestResolveAutonomy_MetricFix(t *testing.T) {
+	cfg := &config.Config{
+		Autonomy: config.AutonomyPolicy{
+			MetricFixes: "suggest-only",
+		},
+	}
+	assert.Equal(t, "suggest-only", triage.ResolveAutonomy("metric_fix", cfg))
+}
+
+func TestResolveAutonomy_MetricFix_Default(t *testing.T) {
+	cfg := &config.Config{}
+	assert.Equal(t, "suggest-only", triage.ResolveAutonomy("metric_fix", cfg))
+}
