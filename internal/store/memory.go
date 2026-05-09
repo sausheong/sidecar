@@ -135,6 +135,42 @@ func (db *DB) GetTaskEvents(ctx context.Context, taskID uuid.UUID) ([]*TaskEvent
 	return events, rows.Err()
 }
 
+// MemoryRow is a materialized memory_entries row, returned by GetMemory
+// and ListMemory. Embedding is omitted because adapter callers don't
+// need it post-write.
+type MemoryRow struct {
+	ID        uuid.UUID
+	Category  string
+	Content   string
+	Origin    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// StoreMemoryReturning inserts a memory entry and returns its id and
+// created_at timestamp. Origin is "agent", "review", or any caller
+// label; persisted in the origin column.
+func (db *DB) StoreMemoryReturning(
+	ctx context.Context,
+	workspaceID uuid.UUID,
+	category, content, origin string,
+	embedding []float32,
+) (uuid.UUID, time.Time, error) {
+	vec := formatVector(embedding)
+	var id uuid.UUID
+	var createdAt time.Time
+	err := db.pool.QueryRow(ctx, `
+		INSERT INTO memory_entries (workspace_id, category, content, origin, embedding)
+		VALUES ($1, $2, $3, $4, $5::vector)
+		RETURNING id, created_at`,
+		workspaceID, category, content, origin, vec,
+	).Scan(&id, &createdAt)
+	if err != nil {
+		return uuid.Nil, time.Time{}, fmt.Errorf("storing memory: %w", err)
+	}
+	return id, createdAt, nil
+}
+
 // formatVector converts []float32 to PostgreSQL vector literal "[f1,f2,...]".
 func formatVector(v []float32) string {
 	var sb strings.Builder

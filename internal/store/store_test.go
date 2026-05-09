@@ -7,6 +7,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/sausheong/sidecar/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -208,4 +209,24 @@ func TestGetTaskEvents(t *testing.T) {
 	require.Len(t, events, 1)
 	assert.Equal(t, "triage", events[0].Type)
 	assert.Equal(t, true, events[0].Payload["should_act"])
+}
+
+func TestStoreMemoryReturning_RoundTrip(t *testing.T) {
+	db, err := store.Connect(context.Background(), dbURL(t))
+	require.NoError(t, err)
+	defer db.Close()
+	require.NoError(t, store.Migrate(context.Background(), db))
+
+	ws := &store.Workspace{Name: "svc", Path: t.TempDir(), ConfigHash: "x"}
+	require.NoError(t, db.UpsertWorkspace(context.Background(), ws))
+
+	embedding := make([]float32, 1024)
+	embedding[0] = 0.5
+
+	id, createdAt, err := db.StoreMemoryReturning(
+		context.Background(), ws.ID, "semantic", "auth uses interface mocking", "review", embedding,
+	)
+	require.NoError(t, err)
+	assert.NotEqual(t, uuid.Nil, id)
+	assert.False(t, createdAt.IsZero())
 }
