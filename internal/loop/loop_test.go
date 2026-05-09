@@ -77,3 +77,16 @@ func TestLoop_MemoryNilSafe(t *testing.T) {
 	assert.NotEmpty(t, models.Coding)
 	assert.NotEmpty(t, models.Triage)
 }
+
+func TestBuildSystemPrompt_ScheduleTick_MemoryGuided(t *testing.T) {
+	sig := adapter.Signal{
+		Type:    adapter.SignalScheduleTick,
+		Source:  "schedule",
+		Payload: map[string]any{},
+	}
+	prompt := loop.BuildSystemPrompt(sig)
+	// Phase 4: prompt must explicitly reference workspace memory
+	assert.Contains(t, prompt, "Workspace Memory")
+	assert.Contains(t, prompt, "fragile")
+	assert.Contains(t, prompt, "engineering agent")
+}
