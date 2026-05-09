@@ -14,6 +14,7 @@ import (
 	"github.com/sausheong/sidecar/internal/adapter"
 	gitadapter "github.com/sausheong/sidecar/internal/adapter/git"
 	"github.com/sausheong/sidecar/internal/adapter/githubci"
+	logsadapter "github.com/sausheong/sidecar/internal/adapter/logs"
 	"github.com/sausheong/sidecar/internal/adapter/schedule"
 	"github.com/sausheong/sidecar/internal/config"
 	"github.com/sausheong/sidecar/internal/daemon"
@@ -117,6 +118,8 @@ func buildAdapters(repoPath string, cfg *config.Config) []adapter.Adapter {
 			token := sig.ResolveToken()
 			interval := sig.ParsedPollInterval()
 			adapters = append(adapters, githubci.New(sig.Repo, token, interval, sig.Watch))
+		case "logs":
+			adapters = append(adapters, logsadapter.New(sig))
 		default:
 			log.Printf("unknown adapter type %q, skipping", sig.Adapter)
 		}
