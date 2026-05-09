@@ -7,6 +7,6 @@ func RootCmd() *cobra.Command {
 		Use:   "sidecar",
 		Short: "Autonomous engineering agent that continuously maintains your software",
 	}
-	root.AddCommand(attachCmd(), taskCmd(), statusCmd())
+	root.AddCommand(attachCmd(), taskCmd(), statusCmd(), askCmd())
 	return root
 }
