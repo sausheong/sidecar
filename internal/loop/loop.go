@@ -13,6 +13,7 @@ import (
 	"github.com/sausheong/harness/runtime"
 	"github.com/sausheong/harness/session"
 	"github.com/sausheong/harness/tool"
+	harnessmem "github.com/sausheong/harness/tool/memory"
 	"github.com/sausheong/harness/tools/bash"
 	"github.com/sausheong/harness/tools/file"
 	"github.com/sausheong/sidecar/internal/adapter"
@@ -64,10 +65,16 @@ type Loop struct {
 	repoPath  string
 	provider  llm.LLMProvider
 	embedding memory.EmbeddingProvider // nil when memory is not configured
+	memTool   *harnessmem.MemoryTool   // nil when embedding is nil
 }
 
 // New constructs a Loop. Pass nil for embedding to disable memory retrieval and reflect.
 func New(db *store.DB, workspace *store.Workspace, cfg *config.Config, repoPath string, embedding memory.EmbeddingProvider) *Loop {
+	var memTool *harnessmem.MemoryTool
+	if embedding != nil {
+		adapter := memory.NewHarnessStoreAdapter(db, embedding, workspace.ID)
+		memTool = &harnessmem.MemoryTool{Store: adapter}
+	}
 	return &Loop{
 		db:        db,
 		workspace: workspace,
@@ -75,6 +82,7 @@ func New(db *store.DB, workspace *store.Workspace, cfg *config.Config, repoPath 
 		repoPath:  repoPath,
 		provider:  anthropic.NewAnthropicProvider(os.Getenv("ANTHROPIC_API_KEY"), ""),
 		embedding: embedding,
+		memTool:   memTool,
 	}
 }
 
@@ -135,31 +143,50 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		reg.Register(&file.EditFileTool{WorkDir: l.repoPath})
 		reg.Register(&bash.BashTool{WorkDir: l.repoPath})
 	}
+	if l.memTool != nil {
+		reg.Register(l.memTool)
+	}
 
 	systemPrompt := BuildSystemPrompt(sig)
 	if memoryBlock != "" {
 		systemPrompt = memoryBlock + "\n\n" + systemPrompt
 	}
 
-	rt, err := runtime.BuildRuntime(
+	taskCopy := *task // capture by value for the OnStop goroutine
+	var rt *runtime.Runtime
+
+	spec := runtime.AgentSpec{
+		ID:           task.ID.String(),
+		Name:         "Sidecar",
+		Model:        models.Coding,
+		Workspace:    l.repoPath,
+		SystemPrompt: systemPrompt,
+		MaxTurns:     20,
+		Loop: runtime.LoopConfig{
+			Hooks: runtime.LifecycleHooks{
+				OnStop: func(_ context.Context, reason string) {
+					if reason != "completed" || l.memTool == nil {
+						return
+					}
+					go l.runReview(rt, taskCopy)
+				},
+			},
+		},
+	}
+
+	var buildErr error
+	rt, buildErr = runtime.BuildRuntime(
 		runtime.RuntimeDeps{},
 		runtime.RuntimeInputs{
 			Provider: l.provider,
 			Tools:    reg,
 			Session:  session.NewSession(task.ID.String(), "main"),
 		},
-		runtime.AgentSpec{
-			ID:           task.ID.String(),
-			Name:         "Sidecar",
-			Model:        models.Coding,
-			Workspace:    l.repoPath,
-			SystemPrompt: systemPrompt,
-			MaxTurns:     20,
-		},
+		spec,
 	)
-	if err != nil {
+	if buildErr != nil {
 		_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusFailed)
-		return fmt.Errorf("building runtime: %w", err)
+		return fmt.Errorf("building runtime: %w", buildErr)
 	}
 	defer rt.Close()
 
@@ -236,6 +263,37 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		l.launchReflect(task)
 		return l.db.UpdateTaskStatus(ctx, task.ID, StatusCompleted)
 	}
+}
+
+// runReview snapshots the parent runtime and extracts memory via a
+// haiku reviewer with the memory tool only. Detaches from the parent
+// ctx (which is canceled by the time OnStop fires) and applies its own
+// 90s timeout.
+func (l *Loop) runReview(parent *runtime.Runtime, task store.Task) {
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	events, err := l.db.GetTaskEvents(ctx, task.ID)
+	if err != nil {
+		slog.Warn("review: failed to load task events", "err", err, "task", task.ID)
+		return
+	}
+
+	reviewerReg := tool.NewRegistry()
+	reviewerReg.Register(l.memTool)
+
+	res := runtime.Review(ctx, parent, runtime.ReviewSpec{
+		Prompt:   buildReviewerPrompt(task, events),
+		Tools:    reviewerReg,
+		Model:    ResolveModels(l.cfg).Triage,
+		MaxTurns: 4,
+		Timeout:  60 * time.Second,
+	})
+	if res.Err != nil {
+		slog.Warn("review failed", "err", res.Err, "task", task.ID)
+		return
+	}
+	slog.Info("review completed", "task", task.ID, "actions", len(res.Actions))
 }
 
 // launchReflect starts an async goroutine to extract memory from a completed task.
