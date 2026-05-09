@@ -40,15 +40,15 @@ func (a *HarnessStoreAdapter) Save(ctx context.Context, e harnessmem.Entry) (har
 
 	embeds, err := a.embeddings.Embed(ctx, []string{e.Content}, "document")
 	if err != nil {
-		return harnessmem.Entry{}, fmt.Errorf("embed: %w", err)
+		return harnessmem.Entry{}, fmt.Errorf("embedding content: %w", err)
 	}
 	if len(embeds) == 0 {
-		return harnessmem.Entry{}, fmt.Errorf("embed: empty result")
+		return harnessmem.Entry{}, fmt.Errorf("embedding content: empty result")
 	}
 
 	id, createdAt, err := a.db.StoreMemoryReturning(ctx, a.workspaceID, category, e.Content, origin, embeds[0])
 	if err != nil {
-		return harnessmem.Entry{}, fmt.Errorf("store: %w", err)
+		return harnessmem.Entry{}, fmt.Errorf("storing memory: %w", err)
 	}
 
 	return harnessmem.Entry{
