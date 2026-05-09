@@ -136,3 +136,51 @@ func TestAdapter_Remove_Idempotent(t *testing.T) {
 	require.NoError(t, a.Remove(context.Background(), saved.ID))
 	require.NoError(t, a.Remove(context.Background(), "not-a-uuid"))
 }
+
+func TestAdapter_Update_InheritsCategoryAndOrigin(t *testing.T) {
+	a, _, _ := newAdapter(t)
+	ctx := context.WithValue(context.Background(), harnessmem.OriginKey, "review")
+
+	saved, err := a.Save(ctx, harnessmem.Entry{
+		Content: "old",
+		Tags:    []string{"procedural"},
+	})
+	require.NoError(t, err)
+
+	updated, err := a.Update(context.Background(), saved.ID, "new")
+	require.NoError(t, err)
+	assert.NotEqual(t, saved.ID, updated.ID, "Update returns a fresh ID")
+	assert.Equal(t, "new", updated.Content)
+	assert.Equal(t, []string{"procedural"}, updated.Tags, "category inherited")
+	assert.Equal(t, "review", updated.Origin, "origin inherited from old row")
+
+	// Old id no longer resolves
+	_, ok, err := a.Get(context.Background(), saved.ID)
+	require.NoError(t, err)
+	assert.False(t, ok, "old id is invalidated")
+
+	// New id resolves
+	_, ok, err = a.Get(context.Background(), updated.ID)
+	require.NoError(t, err)
+	assert.True(t, ok, "new id resolves")
+}
+
+func TestAdapter_Update_NotFound(t *testing.T) {
+	a, _, _ := newAdapter(t)
+
+	_, err := a.Update(context.Background(), uuid.New().String(), "x")
+	assert.ErrorIs(t, err, harnessmem.ErrNotFound)
+
+	_, err = a.Update(context.Background(), "not-a-uuid", "x")
+	assert.ErrorIs(t, err, harnessmem.ErrNotFound)
+}
+
+func TestAdapter_Update_EmptyContentRejected(t *testing.T) {
+	a, _, _ := newAdapter(t)
+
+	saved, err := a.Save(context.Background(), harnessmem.Entry{Content: "x", Tags: []string{"semantic"}})
+	require.NoError(t, err)
+
+	_, err = a.Update(context.Background(), saved.ID, "")
+	assert.ErrorIs(t, err, harnessmem.ErrInvalidContent)
+}

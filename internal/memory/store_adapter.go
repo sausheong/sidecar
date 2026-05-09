@@ -139,7 +139,55 @@ func (a *HarnessStoreAdapter) Remove(ctx context.Context, id string) error {
 	return a.db.DeleteMemory(ctx, parsedID)
 }
 
+// Update tombstones the old row and inserts a new one with re-embedded
+// content. The new entry inherits the old row's category and origin.
+// Returns harnessmem.ErrNotFound when id is malformed or unknown.
+//
+// Best-effort tombstone: the new row is written first, then the old
+// row is deleted. If the delete fails, both rows exist briefly; List
+// will surface both until the delete succeeds. The brief inconsistency
+// is documented in the spec (§10B).
+func (a *HarnessStoreAdapter) Update(ctx context.Context, id string, content string) (harnessmem.Entry, error) {
+	if content == "" {
+		return harnessmem.Entry{}, harnessmem.ErrInvalidContent
+	}
+	parsedID, err := uuid.Parse(id)
+	if err != nil {
+		return harnessmem.Entry{}, harnessmem.ErrNotFound
+	}
+
+	old, err := a.db.GetMemory(ctx, parsedID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return harnessmem.Entry{}, harnessmem.ErrNotFound
+		}
+		return harnessmem.Entry{}, fmt.Errorf("get for update: %w", err)
+	}
+
+	embeds, err := a.embeddings.Embed(ctx, []string{content}, "document")
+	if err != nil {
+		return harnessmem.Entry{}, fmt.Errorf("embedding content: %w", err)
+	}
+	if len(embeds) == 0 {
+		return harnessmem.Entry{}, fmt.Errorf("embedding content: empty result")
+	}
+
+	newID, createdAt, err := a.db.StoreMemoryReturning(ctx, a.workspaceID, old.Category, content, old.Origin, embeds[0])
+	if err != nil {
+		return harnessmem.Entry{}, fmt.Errorf("storing memory: %w", err)
+	}
+	// Best-effort tombstone — failures are accepted (see doc above).
+	_ = a.db.DeleteMemory(ctx, parsedID)
+
+	return harnessmem.Entry{
+		ID:        newID.String(),
+		Content:   content,
+		Tags:      []string{old.Category},
+		CreatedAt: createdAt,
+		UpdatedAt: createdAt,
+		Origin:    old.Origin,
+	}, nil
+}
+
 // Compile-time check that the adapter satisfies the harness interface.
-// NOTE: this will fail until Task 7 adds Update — that's expected and
-// will be resolved when Task 7 lands.
-// var _ harnessmem.MemoryStore = (*HarnessStoreAdapter)(nil) // restored in Task 7 once Update lands
+var _ harnessmem.MemoryStore = (*HarnessStoreAdapter)(nil)
