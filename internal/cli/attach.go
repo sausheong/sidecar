@@ -10,12 +10,11 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/spf13/cobra"
 	"github.com/sausheong/sidecar/internal/adapter"
+	circleciadapter "github.com/sausheong/sidecar/internal/adapter/circleci"
 	gitadapter "github.com/sausheong/sidecar/internal/adapter/git"
 	"github.com/sausheong/sidecar/internal/adapter/githubci"
 	gitlabciadapter "github.com/sausheong/sidecar/internal/adapter/gitlabci"
-	circleciadapter "github.com/sausheong/sidecar/internal/adapter/circleci"
 	logsadapter "github.com/sausheong/sidecar/internal/adapter/logs"
 	metricsadapter "github.com/sausheong/sidecar/internal/adapter/metrics"
 	"github.com/sausheong/sidecar/internal/adapter/schedule"
@@ -23,6 +22,7 @@ import (
 	"github.com/sausheong/sidecar/internal/daemon"
 	"github.com/sausheong/sidecar/internal/loop"
 	"github.com/sausheong/sidecar/internal/store"
+	"github.com/spf13/cobra"
 )
 
 func attachCmd() *cobra.Command {

@@ -95,9 +95,6 @@ func (a *CircleCIAdapter) poll(ctx context.Context, out chan<- adapter.Signal) {
 	for _, p := range pipelines {
 		a.seenMu.Lock()
 		already := a.seen[p.ID]
-		if !already {
-			a.seen[p.ID] = true
-		}
 		a.seenMu.Unlock()
 		if already {
 			continue
@@ -113,6 +110,9 @@ func (a *CircleCIAdapter) poll(ctx context.Context, out chan<- adapter.Signal) {
 			if !a.isWatched(wf.Status) {
 				continue
 			}
+			a.seenMu.Lock()
+			a.seen[p.ID] = true
+			a.seenMu.Unlock()
 			select {
 			case <-a.stopCh:
 				return
