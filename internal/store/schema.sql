@@ -39,6 +39,9 @@ CREATE TABLE IF NOT EXISTS memory_entries (
     embedding    vector(1024),     -- 1024 dims: OpenAI (with dimensions param) + Voyage AI native
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE memory_entries
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ADD COLUMN IF NOT EXISTS origin     TEXT        NOT NULL DEFAULT 'agent';
 CREATE INDEX IF NOT EXISTS memory_entries_embedding_idx
     ON memory_entries USING ivfflat (embedding vector_cosine_ops)
     WITH (lists = 100);

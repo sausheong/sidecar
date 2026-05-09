@@ -34,6 +34,10 @@ func (db *DB) Close() {
 	db.pool.Close()
 }
 
+// Pool returns the underlying pgx pool for callers that need direct
+// query access (typically tests).
+func (db *DB) Pool() *pgxpool.Pool { return db.pool }
+
 func Migrate(ctx context.Context, db *DB) error {
 	_, err := db.pool.Exec(ctx, schema)
 	if err != nil {

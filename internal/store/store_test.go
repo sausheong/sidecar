@@ -130,6 +130,25 @@ func TestMigrate_MemoryTables(t *testing.T) {
 	require.NoError(t, store.Migrate(context.Background(), db))
 }
 
+func TestMigrate_MemoryEntries_NewColumns(t *testing.T) {
+	db, err := store.Connect(context.Background(), dbURL(t))
+	require.NoError(t, err)
+	defer db.Close()
+	require.NoError(t, store.Migrate(context.Background(), db))
+
+	var hasUpdatedAt, hasOrigin bool
+	err = db.Pool().QueryRow(context.Background(), `
+        SELECT
+            EXISTS (SELECT 1 FROM information_schema.columns
+                    WHERE table_name='memory_entries' AND column_name='updated_at'),
+            EXISTS (SELECT 1 FROM information_schema.columns
+                    WHERE table_name='memory_entries' AND column_name='origin')
+    `).Scan(&hasUpdatedAt, &hasOrigin)
+	require.NoError(t, err)
+	assert.True(t, hasUpdatedAt, "memory_entries should have updated_at column")
+	assert.True(t, hasOrigin, "memory_entries should have origin column")
+}
+
 func TestStoreMemory_AndSearch(t *testing.T) {
 	db, err := store.Connect(context.Background(), dbURL(t))
 	require.NoError(t, err)
