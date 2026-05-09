@@ -15,6 +15,7 @@ import (
 	gitadapter "github.com/sausheong/sidecar/internal/adapter/git"
 	"github.com/sausheong/sidecar/internal/adapter/githubci"
 	logsadapter "github.com/sausheong/sidecar/internal/adapter/logs"
+	metricsadapter "github.com/sausheong/sidecar/internal/adapter/metrics"
 	"github.com/sausheong/sidecar/internal/adapter/schedule"
 	"github.com/sausheong/sidecar/internal/config"
 	"github.com/sausheong/sidecar/internal/daemon"
@@ -120,6 +121,12 @@ func buildAdapters(repoPath string, cfg *config.Config) []adapter.Adapter {
 			adapters = append(adapters, githubci.New(sig.Repo, token, interval, sig.Watch))
 		case "logs":
 			adapters = append(adapters, logsadapter.New(sig))
+		case "metrics":
+			if a, err := metricsadapter.NewMetricsAdapter(sig); err == nil {
+				adapters = append(adapters, a)
+			} else {
+				log.Printf("metrics adapter config error: %v", err)
+			}
 		default:
 			log.Printf("unknown adapter type %q, skipping", sig.Adapter)
 		}
