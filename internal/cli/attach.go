@@ -14,6 +14,8 @@ import (
 	"github.com/sausheong/sidecar/internal/adapter"
 	gitadapter "github.com/sausheong/sidecar/internal/adapter/git"
 	"github.com/sausheong/sidecar/internal/adapter/githubci"
+	gitlabciadapter "github.com/sausheong/sidecar/internal/adapter/gitlabci"
+	circleciadapter "github.com/sausheong/sidecar/internal/adapter/circleci"
 	logsadapter "github.com/sausheong/sidecar/internal/adapter/logs"
 	metricsadapter "github.com/sausheong/sidecar/internal/adapter/metrics"
 	"github.com/sausheong/sidecar/internal/adapter/schedule"
@@ -119,6 +121,14 @@ func buildAdapters(repoPath string, cfg *config.Config) []adapter.Adapter {
 			token := sig.ResolveToken()
 			interval := sig.ParsedPollInterval()
 			adapters = append(adapters, githubci.New(sig.Repo, token, interval, sig.Watch))
+		case "gitlab-ci":
+			token := sig.ResolveToken()
+			interval := sig.ParsedPollInterval()
+			adapters = append(adapters, gitlabciadapter.New(sig.Repo, token, interval, sig.Watch))
+		case "circleci":
+			token := sig.ResolveToken()
+			interval := sig.ParsedPollInterval()
+			adapters = append(adapters, circleciadapter.New(sig.Repo, token, interval, sig.Watch))
 		case "logs":
 			adapters = append(adapters, logsadapter.New(sig))
 		case "metrics":
