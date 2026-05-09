@@ -19,7 +19,7 @@ import (
 // TriageResult is the structured output of the triage agent.
 type TriageResult struct {
 	ShouldAct     bool   // false = skip this signal entirely
-	ChangeType    string // "test_fix" | "bug_fix" | "dependency_update" | "refactor" | "unknown"
+	ChangeType    string // "test_fix" | "bug_fix" | "dependency_update" | "refactor" | "log_fix" | "unknown"
 	AutonomyLevel string // "auto-commit" | "pull-request" | "suggest-only"
 	Reason        string // one-sentence explanation
 }
