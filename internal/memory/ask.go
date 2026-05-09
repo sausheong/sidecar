@@ -24,7 +24,7 @@ answer confidently, say so explicitly rather than guessing.`
 
 // Ask retrieves workspace memory relevant to the query and synthesises a
 // natural-language answer using a Haiku agent.
-// Returns an error if no memory exists for the workspace.
+// If no memory exists for the workspace, the agent is informed and will say so.
 func Ask(
 	ctx context.Context,
 	provider EmbeddingProvider,
@@ -119,6 +119,13 @@ func BuildAskMessage(results []*store.MemorySearchResult, policies []string, que
 		case "episodic":
 			episodic = append(episodic, r.Content)
 		}
+	}
+
+	if len(semantic) == 0 && len(procedural) == 0 && len(episodic) == 0 && len(policies) == 0 {
+		sb.Reset()
+		sb.WriteString("Memory: no memory available for this workspace.\n\n")
+		sb.WriteString("Question: " + query)
+		return sb.String()
 	}
 
 	if len(semantic) > 0 {
