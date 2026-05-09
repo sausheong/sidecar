@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -82,3 +83,63 @@ func originFromCtx(ctx context.Context) string {
 	}
 	return "agent"
 }
+
+// Get returns one entry by id. The bool is false (no error) when id
+// is malformed or unknown.
+func (a *HarnessStoreAdapter) Get(ctx context.Context, id string) (harnessmem.Entry, bool, error) {
+	parsedID, err := uuid.Parse(id)
+	if err != nil {
+		return harnessmem.Entry{}, false, nil
+	}
+	r, err := a.db.GetMemory(ctx, parsedID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return harnessmem.Entry{}, false, nil
+		}
+		return harnessmem.Entry{}, false, err
+	}
+	return harnessmem.Entry{
+		ID:        r.ID.String(),
+		Content:   r.Content,
+		Tags:      []string{r.Category},
+		CreatedAt: r.CreatedAt,
+		UpdatedAt: r.UpdatedAt,
+		Origin:    r.Origin,
+	}, true, nil
+}
+
+// List returns rows for the adapter's workspace ordered by created_at.
+// tag filters by category (the tags[0] convention); tag == "" returns
+// all rows for the workspace.
+func (a *HarnessStoreAdapter) List(ctx context.Context, tag string) ([]harnessmem.Entry, error) {
+	rows, err := a.db.ListMemory(ctx, a.workspaceID, tag)
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]harnessmem.Entry, 0, len(rows))
+	for _, r := range rows {
+		entries = append(entries, harnessmem.Entry{
+			ID:        r.ID.String(),
+			Content:   r.Content,
+			Tags:      []string{r.Category},
+			CreatedAt: r.CreatedAt,
+			UpdatedAt: r.UpdatedAt,
+			Origin:    r.Origin,
+		})
+	}
+	return entries, nil
+}
+
+// Remove deletes the row by id. Idempotent for unknown or malformed ids.
+func (a *HarnessStoreAdapter) Remove(ctx context.Context, id string) error {
+	parsedID, err := uuid.Parse(id)
+	if err != nil {
+		return nil
+	}
+	return a.db.DeleteMemory(ctx, parsedID)
+}
+
+// Compile-time check that the adapter satisfies the harness interface.
+// NOTE: this will fail until Task 7 adds Update — that's expected and
+// will be resolved when Task 7 lands.
+// var _ harnessmem.MemoryStore = (*HarnessStoreAdapter)(nil) // restored in Task 7 once Update lands

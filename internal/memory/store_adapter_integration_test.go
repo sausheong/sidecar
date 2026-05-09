@@ -79,3 +79,60 @@ func TestAdapter_Save_EmptyContentRejected(t *testing.T) {
 	_, err := a.Save(context.Background(), harnessmem.Entry{Content: ""})
 	assert.ErrorIs(t, err, harnessmem.ErrInvalidContent)
 }
+
+func TestAdapter_Get_RoundTripAndNotFound(t *testing.T) {
+	a, _, _ := newAdapter(t)
+
+	saved, err := a.Save(context.Background(), harnessmem.Entry{
+		Content: "x", Tags: []string{"semantic"},
+	})
+	require.NoError(t, err)
+
+	got, ok, err := a.Get(context.Background(), saved.ID)
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, "x", got.Content)
+	assert.Equal(t, []string{"semantic"}, got.Tags)
+
+	_, ok, err = a.Get(context.Background(), uuid.New().String())
+	require.NoError(t, err)
+	assert.False(t, ok)
+
+	_, ok, err = a.Get(context.Background(), "not-a-uuid")
+	require.NoError(t, err)
+	assert.False(t, ok)
+}
+
+func TestAdapter_List_AllAndByTag(t *testing.T) {
+	a, _, _ := newAdapter(t)
+
+	_, err := a.Save(context.Background(), harnessmem.Entry{Content: "a", Tags: []string{"semantic"}})
+	require.NoError(t, err)
+	_, err = a.Save(context.Background(), harnessmem.Entry{Content: "b", Tags: []string{"procedural"}})
+	require.NoError(t, err)
+
+	all, err := a.List(context.Background(), "")
+	require.NoError(t, err)
+	assert.Len(t, all, 2)
+
+	semantic, err := a.List(context.Background(), "semantic")
+	require.NoError(t, err)
+	require.Len(t, semantic, 1)
+	assert.Equal(t, "a", semantic[0].Content)
+}
+
+func TestAdapter_Remove_Idempotent(t *testing.T) {
+	a, _, _ := newAdapter(t)
+
+	saved, err := a.Save(context.Background(), harnessmem.Entry{Content: "x", Tags: []string{"semantic"}})
+	require.NoError(t, err)
+
+	require.NoError(t, a.Remove(context.Background(), saved.ID))
+	_, ok, err := a.Get(context.Background(), saved.ID)
+	require.NoError(t, err)
+	assert.False(t, ok)
+
+	// Idempotent
+	require.NoError(t, a.Remove(context.Background(), saved.ID))
+	require.NoError(t, a.Remove(context.Background(), "not-a-uuid"))
+}
