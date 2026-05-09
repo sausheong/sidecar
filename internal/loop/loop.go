@@ -335,6 +335,20 @@ Sample:  %s
 Investigate the root cause. Check relevant code paths, reproduce the issue if possible,
 and apply a fix. Run tests to verify your change.`, base, pattern, source, line)
 
+	case adapter.SignalMetricAlert:
+		name, _ := sig.Payload["alert_name"].(string)
+		message, _ := sig.Payload["message"].(string)
+		provider, _ := sig.Payload["provider"].(string)
+		return fmt.Sprintf(`%s
+
+A metrics alert has fired in the %s monitoring system.
+
+Alert:   %s
+Details: %s
+
+Investigate the root cause in the codebase. Check recent changes, identify the code
+path responsible, and apply a fix. Run tests to verify your change.`, base, provider, name, message)
+
 	default:
 		desc, _ := sig.Payload["description"].(string)
 		return fmt.Sprintf(`%s
@@ -361,6 +375,10 @@ func userMessage(sig adapter.Signal) string {
 		pattern, _ := sig.Payload["pattern"].(string)
 		source, _ := sig.Payload["source"].(string)
 		return fmt.Sprintf("Log anomaly detected: pattern %q in %s. Investigate and fix.", pattern, source)
+	case adapter.SignalMetricAlert:
+		name, _ := sig.Payload["alert_name"].(string)
+		provider, _ := sig.Payload["provider"].(string)
+		return fmt.Sprintf("Metrics alert %q fired in %s. Investigate and fix.", name, provider)
 	default:
 		desc, _ := sig.Payload["description"].(string)
 		if desc == "" {
@@ -392,6 +410,9 @@ func summarize(sig adapter.Signal) string {
 		pattern, _ := sig.Payload["pattern"].(string)
 		source, _ := sig.Payload["source"].(string)
 		return fmt.Sprintf("fix log anomaly: %s in %s", pattern, source)
+	case adapter.SignalMetricAlert:
+		name, _ := sig.Payload["alert_name"].(string)
+		return fmt.Sprintf("fix metric alert: %s", name)
 	default:
 		desc, _ := sig.Payload["description"].(string)
 		runes := []rune(desc)

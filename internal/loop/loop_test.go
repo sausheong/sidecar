@@ -107,3 +107,21 @@ func TestBuildSystemPrompt_LogAnomaly(t *testing.T) {
 	assert.Contains(t, prompt, "nil pointer dereference")
 	assert.Contains(t, prompt, "engineering agent")
 }
+
+func TestBuildSystemPrompt_MetricAlert(t *testing.T) {
+	sig := adapter.Signal{
+		Type:   adapter.SignalMetricAlert,
+		Source: "metrics",
+		Payload: map[string]any{
+			"alert_id":   "1001",
+			"alert_name": "High Error Rate",
+			"message":    "http_errors > 5%",
+			"provider":   "datadog",
+		},
+	}
+	prompt := loop.BuildSystemPrompt(sig)
+	assert.Contains(t, prompt, "High Error Rate")
+	assert.Contains(t, prompt, "http_errors > 5%")
+	assert.Contains(t, prompt, "datadog")
+	assert.Contains(t, prompt, "engineering agent")
+}
