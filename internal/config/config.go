@@ -22,18 +22,40 @@ type EmbeddingConfig struct {
 	Model    string `yaml:"model"`    // optional; uses provider default if empty
 }
 
+type LogsSignalConfig struct {
+	Files     []LogFile     `yaml:"files"`
+	Processes []LogProcess  `yaml:"processes"`
+	Patterns  []LogPattern  `yaml:"patterns"`
+	Rate      LogRateConfig `yaml:"rate"`
+}
+
+type LogFile    struct{ Path    string `yaml:"path"` }
+type LogProcess struct{ Command string `yaml:"command"` }
+
+type LogPattern struct {
+	Match       string `yaml:"match"`
+	QuietPeriod string `yaml:"quiet_period"`
+}
+
+type LogRateConfig struct {
+	Window      string `yaml:"window"`
+	Threshold   int    `yaml:"threshold"`
+	QuietPeriod string `yaml:"quiet_period"`
+}
+
 type WorkspaceConfig struct {
 	Name     string `yaml:"name"`
 	Language string `yaml:"language"`
 }
 
 type SignalConfig struct {
-	Adapter      string   `yaml:"adapter"`
-	Watch        []string `yaml:"watch"`
-	Cron         string   `yaml:"cron"`
-	Repo         string   `yaml:"repo"`          // owner/repo slug (github-ci adapter)
-	Token        string   `yaml:"token"`         // literal or $ENV_VAR reference
-	PollInterval string   `yaml:"poll_interval"` // e.g. "60s", default "60s"
+	Adapter      string           `yaml:"adapter"`
+	Watch        []string         `yaml:"watch"`
+	Cron         string           `yaml:"cron"`
+	Repo         string           `yaml:"repo"`          // owner/repo slug (github-ci adapter)
+	Token        string           `yaml:"token"`         // literal or $ENV_VAR reference
+	PollInterval string           `yaml:"poll_interval"` // e.g. "60s", default "60s"
+	Logs         LogsSignalConfig `yaml:"logs"`
 }
 
 type AutonomyPolicy struct {
@@ -42,6 +64,7 @@ type AutonomyPolicy struct {
 	BugFixes          string `yaml:"bug_fixes"`
 	Refactoring       string `yaml:"refactoring"`
 	SchemaChanges     string `yaml:"schema_changes"`
+	LogFixes          string `yaml:"log_fixes"`
 }
 
 type ModelConfig struct {
