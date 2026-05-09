@@ -96,8 +96,8 @@ func BuildTriageMessage(sig adapter.Signal) string {
 		url, _ := sig.Payload["html_url"].(string)
 		repo, _ := sig.Payload["repo"].(string)
 		isFlake, _ := sig.Payload["is_flake"].(bool)
-		return fmt.Sprintf("GitHub Actions CI failure:\nWorkflow: %s\nConclusion: %s\nCommit: %s\nURL: %s\nRepo: %s\nFlaky: %v\n\nShould this be fixed automatically?",
-			workflow, conclusion, sha, url, repo, isFlake)
+		return fmt.Sprintf("CI failure in %s:\nWorkflow: %s\nConclusion: %s\nCommit: %s\nURL: %s\nRepo: %s\nFlaky: %v\n\nShould this be fixed automatically?",
+			sig.Source, workflow, conclusion, sha, url, repo, isFlake)
 	case adapter.SignalGitCommit:
 		hash, _ := sig.Payload["hash"].(string)
 		return fmt.Sprintf("New git commit: %s\nShould this commit be reviewed and fixed if it introduced issues?", hash)

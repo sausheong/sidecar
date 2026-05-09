@@ -302,13 +302,13 @@ If everything looks good, do nothing.`, base, hash)
 		url, _ := sig.Payload["html_url"].(string)
 		return fmt.Sprintf(`%s
 
-A GitHub Actions CI run failed:
+A CI run failed in %s:
 Workflow: %s
 Commit: %s
 Run URL: %s
 
 Investigate why the CI failed. Check recent changes, read failing test output if accessible,
-and fix the root cause. Run tests locally to verify your fix before committing.`, base, workflow, sha, url)
+and fix the root cause. Run tests locally to verify your fix before committing.`, base, sig.Source, workflow, sha, url)
 
 	case adapter.SignalScheduleTick:
 		return fmt.Sprintf(`%s

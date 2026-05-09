@@ -133,3 +133,22 @@ func TestResolveAutonomy_MetricFix_Default(t *testing.T) {
 	cfg := &config.Config{}
 	assert.Equal(t, "suggest-only", triage.ResolveAutonomy("metric_fix", cfg))
 }
+
+func TestBuildTriageMessage_CIFailure_CircleCI(t *testing.T) {
+	sig := adapter.Signal{
+		Type:   adapter.SignalCIFailure,
+		Source: "circleci",
+		Payload: map[string]any{
+			"workflow_name": "build-and-test",
+			"conclusion":    "failed",
+			"head_sha":      "abc123",
+			"html_url":      "https://app.circleci.com/pipelines/gh/org/repo/42",
+			"repo":          "gh/org/repo",
+			"is_flake":      false,
+		},
+	}
+	msg := triage.BuildTriageMessage(sig)
+	assert.Contains(t, msg, "circleci")
+	assert.Contains(t, msg, "build-and-test")
+	assert.Contains(t, msg, "failed")
+}

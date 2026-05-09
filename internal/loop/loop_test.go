@@ -125,3 +125,21 @@ func TestBuildSystemPrompt_MetricAlert(t *testing.T) {
 	assert.Contains(t, prompt, "datadog")
 	assert.Contains(t, prompt, "engineering agent")
 }
+
+func TestBuildSystemPrompt_CIFailure_GitLab(t *testing.T) {
+	sig := adapter.Signal{
+		Type:   adapter.SignalCIFailure,
+		Source: "gitlab-ci",
+		Payload: map[string]any{
+			"workflow_name": "main",
+			"conclusion":    "failed",
+			"head_sha":      "abc123",
+			"html_url":      "https://gitlab.com/mygroup/myproject/-/pipelines/1",
+		},
+	}
+	prompt := loop.BuildSystemPrompt(sig)
+	assert.Contains(t, prompt, "gitlab-ci")
+	assert.Contains(t, prompt, "main")
+	assert.Contains(t, prompt, "abc123")
+	assert.Contains(t, prompt, "engineering agent")
+}
