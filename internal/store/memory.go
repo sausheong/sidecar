@@ -202,6 +202,45 @@ func (db *DB) DeleteMemory(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// ListMemory returns memory_entries rows for one workspace, ordered by
+// created_at. category == "" returns all categories; otherwise filters
+// to that single category.
+func (db *DB) ListMemory(ctx context.Context, workspaceID uuid.UUID, category string) ([]*MemoryRow, error) {
+	var rows pgx.Rows
+	var err error
+	if category == "" {
+		rows, err = db.pool.Query(ctx, `
+			SELECT id, category, content, origin, created_at, updated_at
+			FROM memory_entries
+			WHERE workspace_id = $1
+			ORDER BY created_at`,
+			workspaceID,
+		)
+	} else {
+		rows, err = db.pool.Query(ctx, `
+			SELECT id, category, content, origin, created_at, updated_at
+			FROM memory_entries
+			WHERE workspace_id = $1 AND category = $2
+			ORDER BY created_at`,
+			workspaceID, category,
+		)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("listing memory: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*MemoryRow
+	for rows.Next() {
+		r := &MemoryRow{}
+		if err := rows.Scan(&r.ID, &r.Category, &r.Content, &r.Origin, &r.CreatedAt, &r.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scanning memory row: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // formatVector converts []float32 to PostgreSQL vector literal "[f1,f2,...]".
 func formatVector(v []float32) string {
 	var sb strings.Builder

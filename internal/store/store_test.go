@@ -280,3 +280,37 @@ func TestDeleteMemory_RoundTripAndIdempotent(t *testing.T) {
 	// Delete again — idempotent
 	require.NoError(t, db.DeleteMemory(context.Background(), id))
 }
+
+func TestListMemory_AllAndByCategory(t *testing.T) {
+	db, err := store.Connect(context.Background(), dbURL(t))
+	require.NoError(t, err)
+	defer db.Close()
+	require.NoError(t, store.Migrate(context.Background(), db))
+
+	ws := &store.Workspace{Name: "svc", Path: t.TempDir(), ConfigHash: "x"}
+	require.NoError(t, db.UpsertWorkspace(context.Background(), ws))
+
+	embedding := make([]float32, 1024)
+	_, _, err = db.StoreMemoryReturning(context.Background(), ws.ID, "semantic", "a", "agent", embedding)
+	require.NoError(t, err)
+	_, _, err = db.StoreMemoryReturning(context.Background(), ws.ID, "semantic", "b", "agent", embedding)
+	require.NoError(t, err)
+	_, _, err = db.StoreMemoryReturning(context.Background(), ws.ID, "procedural", "c", "review", embedding)
+	require.NoError(t, err)
+
+	all, err := db.ListMemory(context.Background(), ws.ID, "")
+	require.NoError(t, err)
+	assert.Len(t, all, 3)
+
+	semantic, err := db.ListMemory(context.Background(), ws.ID, "semantic")
+	require.NoError(t, err)
+	assert.Len(t, semantic, 2)
+	for _, r := range semantic {
+		assert.Equal(t, "semantic", r.Category)
+	}
+
+	procedural, err := db.ListMemory(context.Background(), ws.ID, "procedural")
+	require.NoError(t, err)
+	assert.Len(t, procedural, 1)
+	assert.Equal(t, "review", procedural[0].Origin)
+}
