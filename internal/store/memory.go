@@ -3,12 +3,14 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 // MemorySearchResult is a single entry returned by SearchMemory.
@@ -169,6 +171,35 @@ func (db *DB) StoreMemoryReturning(
 		return uuid.Nil, time.Time{}, fmt.Errorf("storing memory: %w", err)
 	}
 	return id, createdAt, nil
+}
+
+// GetMemory returns one memory_entries row by id.
+// Returns store.ErrNotFound when the id is unknown.
+func (db *DB) GetMemory(ctx context.Context, id uuid.UUID) (*MemoryRow, error) {
+	r := &MemoryRow{}
+	err := db.pool.QueryRow(ctx, `
+		SELECT id, category, content, origin, created_at, updated_at
+		FROM memory_entries
+		WHERE id = $1`,
+		id,
+	).Scan(&r.ID, &r.Category, &r.Content, &r.Origin, &r.CreatedAt, &r.UpdatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("getting memory: %w", err)
+	}
+	return r, nil
+}
+
+// DeleteMemory removes a memory_entries row by id. Returns nil when the
+// id is unknown (idempotent).
+func (db *DB) DeleteMemory(ctx context.Context, id uuid.UUID) error {
+	_, err := db.pool.Exec(ctx, `DELETE FROM memory_entries WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("deleting memory: %w", err)
+	}
+	return nil
 }
 
 // formatVector converts []float32 to PostgreSQL vector literal "[f1,f2,...]".

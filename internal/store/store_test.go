@@ -230,3 +230,53 @@ func TestStoreMemoryReturning_RoundTrip(t *testing.T) {
 	assert.NotEqual(t, uuid.Nil, id)
 	assert.False(t, createdAt.IsZero())
 }
+
+func TestGetMemory_RoundTripAndNotFound(t *testing.T) {
+	db, err := store.Connect(context.Background(), dbURL(t))
+	require.NoError(t, err)
+	defer db.Close()
+	require.NoError(t, store.Migrate(context.Background(), db))
+
+	ws := &store.Workspace{Name: "svc", Path: t.TempDir(), ConfigHash: "x"}
+	require.NoError(t, db.UpsertWorkspace(context.Background(), ws))
+
+	embedding := make([]float32, 1024)
+	id, _, err := db.StoreMemoryReturning(
+		context.Background(), ws.ID, "procedural", "run go test ./...", "agent", embedding,
+	)
+	require.NoError(t, err)
+
+	row, err := db.GetMemory(context.Background(), id)
+	require.NoError(t, err)
+	assert.Equal(t, "procedural", row.Category)
+	assert.Equal(t, "run go test ./...", row.Content)
+	assert.Equal(t, "agent", row.Origin)
+	assert.False(t, row.CreatedAt.IsZero())
+	assert.False(t, row.UpdatedAt.IsZero())
+
+	_, err = db.GetMemory(context.Background(), uuid.New())
+	assert.ErrorIs(t, err, store.ErrNotFound)
+}
+
+func TestDeleteMemory_RoundTripAndIdempotent(t *testing.T) {
+	db, err := store.Connect(context.Background(), dbURL(t))
+	require.NoError(t, err)
+	defer db.Close()
+	require.NoError(t, store.Migrate(context.Background(), db))
+
+	ws := &store.Workspace{Name: "svc", Path: t.TempDir(), ConfigHash: "x"}
+	require.NoError(t, db.UpsertWorkspace(context.Background(), ws))
+
+	embedding := make([]float32, 1024)
+	id, _, err := db.StoreMemoryReturning(
+		context.Background(), ws.ID, "semantic", "x", "agent", embedding,
+	)
+	require.NoError(t, err)
+
+	require.NoError(t, db.DeleteMemory(context.Background(), id))
+	_, err = db.GetMemory(context.Background(), id)
+	assert.ErrorIs(t, err, store.ErrNotFound)
+
+	// Delete again — idempotent
+	require.NoError(t, db.DeleteMemory(context.Background(), id))
+}
