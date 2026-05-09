@@ -85,8 +85,7 @@ func TestBuildSystemPrompt_ScheduleTick_MemoryGuided(t *testing.T) {
 		Payload: map[string]any{},
 	}
 	prompt := loop.BuildSystemPrompt(sig)
-	// Phase 4: prompt must explicitly reference workspace memory
-	assert.Contains(t, prompt, "Workspace Memory")
 	assert.Contains(t, prompt, "fragile")
+	assert.Contains(t, prompt, "workspace memory")
 	assert.Contains(t, prompt, "engineering agent")
 }

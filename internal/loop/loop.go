@@ -313,15 +313,10 @@ and fix the root cause. Run tests locally to verify your fix before committing.`
 	case adapter.SignalScheduleTick:
 		return fmt.Sprintf(`%s
 
-This is a proactive maintenance sweep.
-
-The ## Workspace Memory section above contains what is known about this codebase —
-fragile areas, past failures, and areas noted as undertested.
-
-Use that knowledge to guide your choice. In priority order:
-1. Fix or improve any area flagged as fragile or prone to regression
-2. Add tests to code paths noted as missing coverage
-3. If no specific area is flagged, check for: stale dependencies, dead code, or outdated docs
+This is a proactive maintenance sweep. Look for improvement opportunities:
+- Fix or improve any area flagged as fragile or prone to regression in the workspace memory above
+- Add tests to code paths noted as missing coverage
+- If no specific area is flagged, check for: stale dependencies, dead code, or outdated docs
 
 Pick ONE meaningful improvement and apply it. Run tests to verify your change.`, base)
 

@@ -84,12 +84,23 @@ func Ask(
 	}
 
 	var sb strings.Builder
+	var agentErr error
 	for ev := range events {
 		if ev.Type == runtime.EventTextDelta {
 			sb.WriteString(ev.Text)
 		}
+		if ev.Type == runtime.EventError {
+			agentErr = ev.Error
+		}
 	}
-	return strings.TrimSpace(sb.String()), nil
+	if agentErr != nil {
+		return "", fmt.Errorf("synthesis agent error: %w", agentErr)
+	}
+	answer := strings.TrimSpace(sb.String())
+	if answer == "" && agentErr == nil {
+		return "", fmt.Errorf("synthesis agent produced no output")
+	}
+	return answer, nil
 }
 
 // BuildAskMessage formats the memory context and question for the synthesis agent.
