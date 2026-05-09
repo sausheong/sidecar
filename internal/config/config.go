@@ -43,19 +43,27 @@ type LogRateConfig struct {
 	QuietPeriod string `yaml:"quiet_period"`
 }
 
+type MetricsSignalConfig struct {
+	Provider   string   `yaml:"provider"`    // "datadog" | "prometheus"
+	Endpoint   string   `yaml:"endpoint"`    // Prometheus base URL, e.g. "http://localhost:9090"
+	Tags       []string `yaml:"tags"`        // Datadog: filter monitors by tags
+	AlertNames []string `yaml:"alert_names"` // optional allowlist; empty = all alerts
+}
+
 type WorkspaceConfig struct {
 	Name     string `yaml:"name"`
 	Language string `yaml:"language"`
 }
 
 type SignalConfig struct {
-	Adapter      string           `yaml:"adapter"`
-	Watch        []string         `yaml:"watch"`
-	Cron         string           `yaml:"cron"`
-	Repo         string           `yaml:"repo"`          // owner/repo slug (github-ci adapter)
-	Token        string           `yaml:"token"`         // literal or $ENV_VAR reference
-	PollInterval string           `yaml:"poll_interval"` // e.g. "60s", default "60s"
-	Logs         LogsSignalConfig `yaml:"logs"`
+	Adapter      string              `yaml:"adapter"`
+	Watch        []string            `yaml:"watch"`
+	Cron         string              `yaml:"cron"`
+	Repo         string              `yaml:"repo"`          // owner/repo slug (github-ci adapter)
+	Token        string              `yaml:"token"`         // literal or $ENV_VAR reference
+	PollInterval string              `yaml:"poll_interval"` // e.g. "60s", default "60s"
+	Logs         LogsSignalConfig    `yaml:"logs"`
+	Metrics      MetricsSignalConfig `yaml:"metrics"`
 }
 
 type AutonomyPolicy struct {
@@ -65,6 +73,7 @@ type AutonomyPolicy struct {
 	Refactoring       string `yaml:"refactoring"`
 	SchemaChanges     string `yaml:"schema_changes"`
 	LogFixes          string `yaml:"log_fixes"`
+	MetricFixes       string `yaml:"metric_fixes"`
 }
 
 type ModelConfig struct {
