@@ -100,6 +100,89 @@ func TestLogsAdapter_FileKeywordNoDoubleFire(t *testing.T) {
 	assert.Equal(t, 1, len(signals), "second ERROR must not fire while pattern is disarmed")
 }
 
+func TestLogsAdapter_ProcessKeywordMatch(t *testing.T) {
+	sig := config.SignalConfig{
+		PollInterval: "50ms",
+		Logs: config.LogsSignalConfig{
+			Processes: []config.LogProcess{
+				{Command: `echo "ERROR: from process"`},
+			},
+			Patterns: []config.LogPattern{
+				{Match: "ERROR", QuietPeriod: "1m"},
+			},
+		},
+	}
+
+	a := logsadapter.New(sig)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	signals := make(chan adapter.Signal, 5)
+	require.NoError(t, a.Start(ctx, signals))
+	defer a.Stop()
+
+	select {
+	case got := <-signals:
+		assert.Equal(t, adapter.SignalLogAnomaly, got.Type)
+		assert.Equal(t, "logs", got.Source)
+		assert.Equal(t, "ERROR", got.Payload["pattern"])
+	case <-ctx.Done():
+		t.Fatal("no signal received from process within timeout")
+	}
+}
+
+func TestLogsAdapter_RearmAfterQuietPeriod(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "*.log")
+	require.NoError(t, err)
+	_, _ = f.WriteString("startup\n")
+	f.Sync()
+
+	sig := config.SignalConfig{
+		PollInterval: "50ms",
+		Logs: config.LogsSignalConfig{
+			Files: []config.LogFile{{Path: f.Name()}},
+			Patterns: []config.LogPattern{
+				{Match: "ERROR", QuietPeriod: "200ms"}, // short quiet period for testing
+			},
+		},
+	}
+
+	a := logsadapter.New(sig)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	signals := make(chan adapter.Signal, 10)
+	require.NoError(t, a.Start(ctx, signals))
+	defer a.Stop()
+
+	time.Sleep(100 * time.Millisecond) // let adapter seek to EOF
+
+	// First match — should fire and disarm
+	_, _ = f.WriteString("ERROR: first\n")
+	f.Sync()
+
+	select {
+	case got := <-signals:
+		assert.Equal(t, adapter.SignalLogAnomaly, got.Type)
+	case <-ctx.Done():
+		t.Fatal("first signal not received")
+	}
+
+	// Wait for quiet period (200ms) to elapse and for the rearmLoop ticker (1s) to fire.
+	time.Sleep(1500 * time.Millisecond)
+
+	// Second match — should fire again after re-arming
+	_, _ = f.WriteString("ERROR: second\n")
+	f.Sync()
+
+	select {
+	case got := <-signals:
+		assert.Equal(t, adapter.SignalLogAnomaly, got.Type)
+	case <-ctx.Done():
+		t.Fatal("second signal not received after re-arm")
+	}
+}
+
 func TestLogsAdapter_FileRateThreshold(t *testing.T) {
 	f, err := os.CreateTemp(t.TempDir(), "*.log")
 	require.NoError(t, err)

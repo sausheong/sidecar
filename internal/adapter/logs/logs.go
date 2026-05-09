@@ -135,14 +135,21 @@ func (a *LogsAdapter) Stop() error {
 }
 
 func (a *LogsAdapter) tailFile(ctx context.Context, path string, out chan<- adapter.Signal) {
-	f, err := os.Open(path)
-	if err != nil {
-		slog.Warn("logs adapter: cannot open file", "path", path, "err", err)
+	openFile := func() (*os.File, int64) {
+		f, err := os.Open(path)
+		if err != nil {
+			slog.Warn("logs adapter: cannot open file", "path", path, "err", err)
+			return nil, 0
+		}
+		offset, _ := f.Seek(0, io.SeekEnd)
+		return f, offset
+	}
+
+	f, offset := openFile()
+	if f == nil {
 		return
 	}
 	defer f.Close()
-
-	offset, _ := f.Seek(0, io.SeekEnd)
 
 	ticker := time.NewTicker(a.poll)
 	defer ticker.Stop()
@@ -159,8 +166,12 @@ func (a *LogsAdapter) tailFile(ctx context.Context, path string, out chan<- adap
 				continue
 			}
 			if info.Size() < offset {
-				// Log rotation: restart from beginning.
-				offset, _ = f.Seek(0, io.SeekStart)
+				// Log rotation: close old inode, reopen at path.
+				f.Close()
+				f, offset = openFile()
+				if f == nil {
+					return
+				}
 				continue
 			}
 			if info.Size() == offset {
@@ -173,7 +184,6 @@ func (a *LogsAdapter) tailFile(ctx context.Context, path string, out chan<- adap
 			if err != nil || len(data) == 0 {
 				continue
 			}
-			// Only process complete lines (up to last newline) to avoid partial reads.
 			lastNL := bytes.LastIndexByte(data, '\n')
 			if lastNL < 0 {
 				continue
