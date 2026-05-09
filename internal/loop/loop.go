@@ -168,6 +168,11 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 					if reason != "completed" || l.memTool == nil {
 						return
 					}
+					// Fire-and-forget reviewer. The goroutine outlives this hook
+					// (and the surrounding Loop.Run, which will defer rt.Close()).
+					// Safe today: Runtime.Close only releases MCP clients, and sidecar
+					// has none. If sidecar later wires MCP servers via AgentSpec.MCPServers,
+					// this needs a WaitGroup so Close waits for the reviewer to finish.
 					go l.runReview(rt, taskCopy)
 				},
 			},
@@ -270,7 +275,9 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 // ctx (which is canceled by the time OnStop fires) and applies its own
 // 90s timeout.
 func (l *Loop) runReview(parent *runtime.Runtime, task store.Task) {
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	// 70s outer = 60s ReviewSpec.Timeout (capped by Review itself) +
+	// ~10s headroom for GetTaskEvents and reviewer-runtime construction.
+	ctx, cancel := context.WithTimeout(context.Background(), 70*time.Second)
 	defer cancel()
 
 	events, err := l.db.GetTaskEvents(ctx, task.ID)
