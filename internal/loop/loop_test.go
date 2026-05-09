@@ -89,3 +89,21 @@ func TestBuildSystemPrompt_ScheduleTick_MemoryGuided(t *testing.T) {
 	assert.Contains(t, prompt, "workspace memory")
 	assert.Contains(t, prompt, "engineering agent")
 }
+
+func TestBuildSystemPrompt_LogAnomaly(t *testing.T) {
+	sig := adapter.Signal{
+		Type:   adapter.SignalLogAnomaly,
+		Source: "logs",
+		Payload: map[string]any{
+			"pattern": "ERROR",
+			"line":    "ERROR: nil pointer dereference at main.go:42",
+			"source":  "logs/app.log",
+			"count":   1,
+		},
+	}
+	prompt := loop.BuildSystemPrompt(sig)
+	assert.Contains(t, prompt, "ERROR")
+	assert.Contains(t, prompt, "logs/app.log")
+	assert.Contains(t, prompt, "nil pointer dereference")
+	assert.Contains(t, prompt, "engineering agent")
+}

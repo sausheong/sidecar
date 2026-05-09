@@ -320,6 +320,21 @@ This is a proactive maintenance sweep. Look for improvement opportunities:
 
 Pick ONE meaningful improvement and apply it. Run tests to verify your change.`, base)
 
+	case adapter.SignalLogAnomaly:
+		pattern, _ := sig.Payload["pattern"].(string)
+		source, _ := sig.Payload["source"].(string)
+		line, _ := sig.Payload["line"].(string)
+		return fmt.Sprintf(`%s
+
+A log anomaly was detected in the running application.
+
+Pattern: %s
+Source:  %s
+Sample:  %s
+
+Investigate the root cause. Check relevant code paths, reproduce the issue if possible,
+and apply a fix. Run tests to verify your change.`, base, pattern, source, line)
+
 	default:
 		desc, _ := sig.Payload["description"].(string)
 		return fmt.Sprintf(`%s
@@ -342,6 +357,10 @@ func userMessage(sig adapter.Signal) string {
 		return fmt.Sprintf("CI failure in workflow %q on commit %s. Investigate and fix.", workflow, sha)
 	case adapter.SignalScheduleTick:
 		return "Proactive sweep: identify and apply one meaningful improvement."
+	case adapter.SignalLogAnomaly:
+		pattern, _ := sig.Payload["pattern"].(string)
+		source, _ := sig.Payload["source"].(string)
+		return fmt.Sprintf("Log anomaly detected: pattern %q in %s. Investigate and fix.", pattern, source)
 	default:
 		desc, _ := sig.Payload["description"].(string)
 		if desc == "" {
@@ -369,6 +388,10 @@ func summarize(sig adapter.Signal) string {
 		return fmt.Sprintf("fix CI failure in %s @ %s", workflow, sha)
 	case adapter.SignalScheduleTick:
 		return "proactive sweep"
+	case adapter.SignalLogAnomaly:
+		pattern, _ := sig.Payload["pattern"].(string)
+		source, _ := sig.Payload["source"].(string)
+		return fmt.Sprintf("fix log anomaly: %s in %s", pattern, source)
 	default:
 		desc, _ := sig.Payload["description"].(string)
 		runes := []rune(desc)
