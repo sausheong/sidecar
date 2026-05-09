@@ -10,6 +10,7 @@ const (
 	SignalOnDemand     SignalType = "ondemand.task"
 	SignalCIFailure    SignalType = "ci.failure"
 	SignalLogAnomaly   SignalType = "log.anomaly"
+	SignalMetricAlert  SignalType = "metric.alert"
 )
 
 type Signal struct {
