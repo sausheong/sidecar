@@ -149,7 +149,7 @@ func (a *LogsAdapter) tailFile(ctx context.Context, path string, out chan<- adap
 	if f == nil {
 		return
 	}
-	defer f.Close()
+	defer func() { f.Close() }()
 
 	ticker := time.NewTicker(a.poll)
 	defer ticker.Stop()
@@ -165,7 +165,15 @@ func (a *LogsAdapter) tailFile(ctx context.Context, path string, out chan<- adap
 			if err != nil {
 				continue
 			}
-			if info.Size() < offset {
+			// Detect rotation: either the file shrank (truncation) or the
+			// path now points to a different inode (rename/remove+recreate).
+			rotated := info.Size() < offset
+			if !rotated {
+				if pathInfo, err := os.Stat(path); err == nil {
+					rotated = !os.SameFile(info, pathInfo)
+				}
+			}
+			if rotated {
 				// Log rotation: close old inode, reopen at path.
 				f.Close()
 				f, offset = openFile()

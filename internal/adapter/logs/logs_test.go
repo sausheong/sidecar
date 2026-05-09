@@ -3,6 +3,7 @@ package logs_test
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -231,4 +232,57 @@ func TestLogsAdapter_FileRateThreshold(t *testing.T) {
 	assert.Equal(t, adapter.SignalLogAnomaly, rateSignal.Type)
 	assert.Equal(t, "rate", rateSignal.Payload["pattern"])
 	assert.Equal(t, 3, rateSignal.Payload["count"])
+}
+
+func TestLogsAdapter_FileRotation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "app.log")
+
+	// Create initial log file
+	f, err := os.Create(path)
+	require.NoError(t, err)
+	_, _ = f.WriteString("startup\n")
+	f.Sync()
+
+	sig := config.SignalConfig{
+		PollInterval: "50ms",
+		Logs: config.LogsSignalConfig{
+			Files: []config.LogFile{{Path: path}},
+			Patterns: []config.LogPattern{
+				{Match: "ERROR", QuietPeriod: "1m"},
+			},
+		},
+	}
+
+	a := logsadapter.New(sig)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	signals := make(chan adapter.Signal, 5)
+	require.NoError(t, a.Start(ctx, signals))
+	defer a.Stop()
+
+	time.Sleep(100 * time.Millisecond) // let adapter seek to EOF
+
+	// Simulate log rotation: replace file with a new one at the same path
+	f.Close()
+	require.NoError(t, os.Remove(path))
+	f2, err := os.Create(path)
+	require.NoError(t, err)
+	defer f2.Close()
+
+	// Give adapter a couple of poll cycles to detect the rotation
+	time.Sleep(200 * time.Millisecond)
+
+	// Write a matching line to the new file
+	_, _ = f2.WriteString("ERROR: after rotation\n")
+	f2.Sync()
+
+	select {
+	case got := <-signals:
+		assert.Equal(t, adapter.SignalLogAnomaly, got.Type)
+		assert.Equal(t, "ERROR", got.Payload["pattern"])
+	case <-ctx.Done():
+		t.Fatal("no signal received after log rotation")
+	}
 }
