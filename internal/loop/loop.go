@@ -68,7 +68,7 @@ type Loop struct {
 	memTool   *harnessmem.MemoryTool   // nil when embedding is nil
 }
 
-// New constructs a Loop. Pass nil for embedding to disable memory retrieval and reflect.
+// New constructs a Loop. Pass nil for embedding to disable memory retrieval and reviewer-driven memory writes.
 func New(db *store.DB, workspace *store.Workspace, cfg *config.Config, repoPath string, embedding memory.EmbeddingProvider) *Loop {
 	var memTool *harnessmem.MemoryTool
 	if embedding != nil {
