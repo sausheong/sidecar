@@ -201,21 +201,25 @@ func (a *LogsAdapter) runProcess(ctx context.Context, command string, out chan<-
 		return
 	}
 
+	done := make(chan struct{})
 	go func() {
 		_ = cmd.Wait()
 		pw.Close()
+		close(done)
+	}()
+
+	// Kill proactively when stop is requested, so Stop() unblocks promptly.
+	go func() {
+		select {
+		case <-a.stopCh:
+			_ = cmd.Process.Kill()
+		case <-done:
+		}
 	}()
 
 	scanner := bufio.NewScanner(pr)
 	for scanner.Scan() {
-		select {
-		case <-a.stopCh:
-			_ = cmd.Process.Kill()
-			pr.Close()
-			return
-		default:
-			a.processLine(scanner.Text(), command, out)
-		}
+		a.processLine(scanner.Text(), command, out)
 	}
 	pr.Close()
 }
@@ -224,9 +228,8 @@ func (a *LogsAdapter) runProcess(ctx context.Context, command string, out chan<-
 // rate window. Emits SignalLogAnomaly when a pattern or rate threshold fires.
 func (a *LogsAdapter) processLine(line, source string, out chan<- adapter.Signal) {
 	a.mu.Lock()
-	defer a.mu.Unlock()
-
 	now := time.Now()
+	var toSend []adapter.Signal
 
 	// Keyword matching: each armed pattern fires at most once per quiet period.
 	for i := range a.patterns {
@@ -236,10 +239,7 @@ func (a *LogsAdapter) processLine(line, source string, out chan<- adapter.Signal
 		}
 		p.armed = false
 		p.lastMatch = now
-		select {
-		case <-a.stopCh:
-			return
-		case out <- adapter.Signal{
+		toSend = append(toSend, adapter.Signal{
 			Type:   adapter.SignalLogAnomaly,
 			Source: "logs",
 			Payload: map[string]any{
@@ -248,49 +248,52 @@ func (a *LogsAdapter) processLine(line, source string, out chan<- adapter.Signal
 				"source":  source,
 				"count":   1,
 			},
-		}:
-		}
+		})
 	}
 
 	// Rate tracking: counts all pattern matches in the sliding window.
-	if a.rate.threshold == 0 || !a.rate.armed {
-		return
-	}
-	for _, p := range a.patterns {
-		if !p.re.MatchString(line) {
-			continue
-		}
-		cutoff := now.Add(-a.rate.window)
-		j := 0
-		for _, t := range a.rate.matches {
-			if t.After(cutoff) {
-				a.rate.matches[j] = t
-				j++
+	if a.rate.threshold > 0 && a.rate.armed {
+		for _, p := range a.patterns {
+			if !p.re.MatchString(line) {
+				continue
 			}
-		}
-		a.rate.matches = append(a.rate.matches[:j], now)
+			cutoff := now.Add(-a.rate.window)
+			j := 0
+			for _, t := range a.rate.matches {
+				if t.After(cutoff) {
+					a.rate.matches[j] = t
+					j++
+				}
+			}
+			a.rate.matches = append(a.rate.matches[:j], now)
 
-		if len(a.rate.matches) >= a.rate.threshold {
-			a.rate.armed = false
-			a.rate.lastFire = now
-			count := len(a.rate.matches)
-			a.rate.matches = nil
-			select {
-			case <-a.stopCh:
-				return
-			case out <- adapter.Signal{
-				Type:   adapter.SignalLogAnomaly,
-				Source: "logs",
-				Payload: map[string]any{
-					"pattern": "rate",
-					"line":    line,
-					"source":  source,
-					"count":   count,
-				},
-			}:
+			if len(a.rate.matches) >= a.rate.threshold {
+				a.rate.armed = false
+				a.rate.lastFire = now
+				count := len(a.rate.matches)
+				a.rate.matches = nil
+				toSend = append(toSend, adapter.Signal{
+					Type:   adapter.SignalLogAnomaly,
+					Source: "logs",
+					Payload: map[string]any{
+						"pattern": "rate",
+						"line":    line,
+						"source":  source,
+						"count":   count,
+					},
+				})
 			}
+			break
 		}
-		break
+	}
+	a.mu.Unlock()
+
+	for _, sig := range toSend {
+		select {
+		case <-a.stopCh:
+			return
+		case out <- sig:
+		}
 	}
 }
 
