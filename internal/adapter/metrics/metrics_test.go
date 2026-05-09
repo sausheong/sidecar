@@ -2,6 +2,7 @@ package metrics_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -128,4 +129,39 @@ func TestMetricsAdapter_NewMetricsAdapter_PrometheusEmptyEndpoint(t *testing.T) 
 	_, err := metricsadapter.NewMetricsAdapter(sig)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "endpoint")
+}
+
+func TestMetricsAdapter_ProviderErrorDoesNotResetSeen(t *testing.T) {
+	mock := &mockProvider{alerts: []metricsadapter.Alert{
+		{ID: "alert-1", Name: "High CPU", Message: "cpu > 90%"},
+	}}
+	a := makeAdapter(mock)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	signals := make(chan adapter.Signal, 10)
+	require.NoError(t, a.Start(ctx, signals))
+	defer a.Stop()
+
+	// First trigger: alert fires and is added to seen.
+	select {
+	case <-signals:
+	case <-ctx.Done():
+		t.Fatal("first signal not received")
+	}
+
+	// Inject errors — seen map must NOT be cleared.
+	mock.mu.Lock()
+	mock.err = errors.New("transient timeout")
+	mock.mu.Unlock()
+	time.Sleep(200 * time.Millisecond)
+
+	// Clear the error, keep same alert firing.
+	mock.mu.Lock()
+	mock.err = nil
+	mock.mu.Unlock()
+	time.Sleep(200 * time.Millisecond)
+
+	// Alert should NOT re-fire (still in seen).
+	assert.Equal(t, 0, len(signals), "alert must not re-fire after transient error clears")
 }

@@ -65,6 +65,10 @@ func (p *PrometheusProvider) FiringAlerts(ctx context.Context) ([]Alert, error) 
 		return nil, err
 	}
 
+	if pr.Status != "success" {
+		return nil, fmt.Errorf("prometheus api returned status %q", pr.Status)
+	}
+
 	allowList := make(map[string]bool, len(p.alertNames))
 	for _, n := range p.alertNames {
 		allowList[n] = true
