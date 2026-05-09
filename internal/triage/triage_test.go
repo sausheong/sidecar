@@ -76,3 +76,29 @@ func TestBuildTriageMessage_OnDemand(t *testing.T) {
 	msg := triage.BuildTriageMessage(sig)
 	assert.Contains(t, msg, "fix the auth bug")
 }
+
+func TestBuildTriageMessage_LogAnomaly(t *testing.T) {
+	sig := adapter.Signal{
+		Type:   adapter.SignalLogAnomaly,
+		Source: "logs",
+		Payload: map[string]any{
+			"pattern": "ERROR",
+			"line":    "2026-05-09 ERROR: nil pointer dereference",
+			"source":  "logs/app.log",
+			"count":   1,
+		},
+	}
+	msg := triage.BuildTriageMessage(sig)
+	assert.Contains(t, msg, "ERROR")
+	assert.Contains(t, msg, "logs/app.log")
+	assert.Contains(t, msg, "nil pointer dereference")
+}
+
+func TestResolveAutonomy_LogFix(t *testing.T) {
+	cfg := &config.Config{
+		Autonomy: config.AutonomyPolicy{
+			LogFixes: "suggest-only",
+		},
+	}
+	assert.Equal(t, "suggest-only", triage.ResolveAutonomy("log_fix", cfg))
+}

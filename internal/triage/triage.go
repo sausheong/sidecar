@@ -29,7 +29,7 @@ Analyze the incoming signal and decide:
 1. Whether it warrants autonomous action (should_act: true/false)
 2. If so, what type of change is needed
 
-Valid change_type values: "test_fix", "bug_fix", "dependency_update", "refactor", "unknown"
+Valid change_type values: "test_fix", "bug_fix", "dependency_update", "refactor", "log_fix", "unknown"
 
 Do NOT act (should_act: false) for:
 - CI failures caused by infrastructure issues (network timeouts, disk full, runner unavailable)
@@ -103,6 +103,12 @@ func BuildTriageMessage(sig adapter.Signal) string {
 		return fmt.Sprintf("New git commit: %s\nShould this commit be reviewed and fixed if it introduced issues?", hash)
 	case adapter.SignalScheduleTick:
 		return "Scheduled maintenance sweep. Should a proactive improvement be made to the codebase?"
+	case adapter.SignalLogAnomaly:
+		pattern, _ := sig.Payload["pattern"].(string)
+		source, _ := sig.Payload["source"].(string)
+		line, _ := sig.Payload["line"].(string)
+		return fmt.Sprintf("Log anomaly detected:\nPattern: %s\nSource: %s\nSample: %s\n\nShould this be investigated and fixed automatically?",
+			pattern, source, line)
 	default:
 		desc, _ := sig.Payload["description"].(string)
 		return fmt.Sprintf("On-demand task: %s\nShould this task be executed?", desc)
@@ -140,6 +146,8 @@ func ResolveAutonomy(changeType string, cfg *config.Config) string {
 		level = cfg.Autonomy.DependencyUpdates
 	case "refactor":
 		level = cfg.Autonomy.Refactoring
+	case "log_fix":
+		level = cfg.Autonomy.LogFixes
 	}
 	if level == "" {
 		return "suggest-only"
