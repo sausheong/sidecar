@@ -9,6 +9,7 @@ const (
 	SignalScheduleTick SignalType = "schedule.tick"
 	SignalOnDemand     SignalType = "ondemand.task"
 	SignalCIFailure    SignalType = "ci.failure"
+	SignalLogAnomaly   SignalType = "log.anomaly"
 )
 
 type Signal struct {
