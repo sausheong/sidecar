@@ -1,0 +1,44 @@
+workspace:
+  name: "sidecar-pyapp"
+  language: "python"
+
+signals:
+  # React to every commit
+  - adapter: git
+
+  # Nightly proactive sweep
+  - adapter: schedule
+    cron: "0 0 2 * * *"
+
+  # Watch app.log for ERROR bursts — trigger with: curl -X POST http://localhost:8081/demo/stress
+  - adapter: logs
+    poll_interval: "2s"
+    logs:
+      files:
+        - path: "logs/app.log"
+      patterns:
+        - match: "ERROR"
+          quiet_period: "2m"
+      rate:
+        window: "30s"
+        threshold: 5
+        quiet_period: "1m"
+
+  # Watch Prometheus for HighErrorRate alert (optional — requires Prometheus)
+  - adapter: metrics
+    poll_interval: "30s"
+    metrics:
+      provider: prometheus
+      endpoint: "http://localhost:9090"
+
+autonomy:
+  test_fixes: auto-commit
+  dependency_updates: auto-commit
+  bug_fixes: pull-request
+  refactoring: suggest-only
+  log_fixes: suggest-only
+  metric_fixes: suggest-only
+
+embedding:
+  provider: openai
+  model: text-embedding-3-small
