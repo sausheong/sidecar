@@ -296,6 +296,39 @@ sidecar status
 sidecar ask "what are the most fragile parts of this codebase?"
 ```
 
+## Demo Project
+
+`examples/webapp/` is a minimal Go task-tracker API purpose-built to exercise every Sidecar signal adapter. It ships with seeded bugs, intentionally failing tests, and an error-generating endpoint so you can see Sidecar react and fix things out of the box.
+
+| Seeded issue | Sidecar adapter that catches it |
+|---|---|
+| `DELETE /tasks/{id}` returns 200 instead of 204 | CI adapter (failing test) |
+| `POST /tasks` accepts empty title | CI adapter (failing test) |
+| Missing test for `PUT /tasks/{id}` | Schedule adapter (nightly sweep) |
+| `POST /demo/stress` generates ERROR log bursts | Logs adapter |
+| `HighErrorRate` Prometheus alerting rule | Metrics adapter |
+
+**Quick start:**
+
+```bash
+# 1. Start the webapp
+cd examples/webapp
+go run ./cmd/webapp          # listens on :8080
+
+# 2. Attach Sidecar (in another terminal, from examples/webapp/)
+export SIDECAR_DB_URL="postgres://sidecar:sidecar@localhost:5433/sidecar"
+export ANTHROPIC_API_KEY="sk-ant-..."
+sidecar attach .
+
+# 3. Trigger the logs adapter — 6 hits in 30 seconds
+for i in $(seq 1 6); do curl -s -X POST http://localhost:8080/demo/stress; done
+
+# 4. Run an on-demand task
+sidecar task "review test coverage and add missing tests" --repo .
+```
+
+See `examples/webapp/README.md` for the full guide including Prometheus setup and how to wire the GitHub CI adapter.
+
 ## Architecture Notes
 
 - Built on [harness](https://github.com/sausheong/harness) — a Go library for building LLM agents
