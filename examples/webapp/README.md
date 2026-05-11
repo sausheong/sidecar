@@ -31,14 +31,29 @@ docker run --rm -p 9090:9090 \
 
 Then open http://localhost:9090/alerts.
 
+## Start the Sidecar database
+
+Sidecar needs PostgreSQL with the pgvector extension. The quickest way:
+
+```bash
+docker run -d --name sidecar-db \
+  -e POSTGRES_USER=sidecar \
+  -e POSTGRES_PASSWORD=sidecar \
+  -e POSTGRES_DB=sidecar \
+  -p 5432:5432 \
+  pgvector/pgvector:pg17
+```
+
+Or point `SIDECAR_DB_URL` at any existing PostgreSQL 15+ instance that has pgvector — including Neon (free tier has pgvector built in).
+
 ## Attach Sidecar
 
 ```bash
-export SIDECAR_DB_URL="postgres://sidecar:sidecar@localhost:5433/sidecar"
+export SIDECAR_DB_URL="postgres://sidecar:sidecar@localhost:5432/sidecar"
 export ANTHROPIC_API_KEY="sk-ant-..."
-export OPENAI_API_KEY="sk-..."   # for memory
+export OPENAI_API_KEY="sk-..."   # for memory (optional)
 
-cd examples/webapp
+# from examples/webapp/
 sidecar attach .
 ```
 
