@@ -40,8 +40,9 @@ docker run -d --name sidecar-db \
   -e POSTGRES_USER=sidecar \
   -e POSTGRES_PASSWORD=sidecar \
   -e POSTGRES_DB=sidecar \
-  -p 5432:5432 \
+  -p 5433:5432 \
   pgvector/pgvector:pg17
+# Port 5433 avoids conflicts with any existing postgres on 5432
 ```
 
 Or point `SIDECAR_DB_URL` at any existing PostgreSQL 15+ instance that has pgvector — including Neon (free tier has pgvector built in).
@@ -49,7 +50,7 @@ Or point `SIDECAR_DB_URL` at any existing PostgreSQL 15+ instance that has pgvec
 ## Attach Sidecar
 
 ```bash
-export SIDECAR_DB_URL="postgres://sidecar:sidecar@localhost:5432/sidecar?sslmode=disable"
+export SIDECAR_DB_URL="postgres://sidecar:sidecar@localhost:5433/sidecar?sslmode=disable"
 export ANTHROPIC_API_KEY="sk-ant-..."
 export OPENAI_API_KEY="sk-..."   # for memory (optional)
 
