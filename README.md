@@ -336,3 +336,4 @@ See `examples/webapp/README.md` for the full guide including Prometheus setup an
 - The `sidecar.yaml` in the target repo is the only coupling between the software and its agent — no code changes required in the managed project
 - Each signal triggers an independent task; tasks do not interfere with each other
 - The coding agent has access to `read_file`, `write_file`, `edit_file`, and `bash` tools; write tools are gated by autonomy level
+# test
