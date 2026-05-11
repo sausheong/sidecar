@@ -50,7 +50,7 @@ func (h *Handler) GetTask(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	task, ok := h.store.Get(id)
 	if !ok {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		http.NotFound(w, r)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -83,6 +83,7 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(task)
 }
 
