@@ -87,3 +87,4 @@ sidecar task "review test coverage and add missing tests" --repo .
 | POST | `/demo/stress` | Generate a 500 error (triggers logs adapter) |
 | GET | `/metrics` | Prometheus metrics |
 # test Mon 11 May 2026 23:05:56 +08
+# demo Mon 11 May 2026 23:20:50 +08
