@@ -49,7 +49,7 @@ Or point `SIDECAR_DB_URL` at any existing PostgreSQL 15+ instance that has pgvec
 ## Attach Sidecar
 
 ```bash
-export SIDECAR_DB_URL="postgres://sidecar:sidecar@localhost:5432/sidecar"
+export SIDECAR_DB_URL="postgres://sidecar:sidecar@localhost:5432/sidecar?sslmode=disable"
 export ANTHROPIC_API_KEY="sk-ant-..."
 export OPENAI_API_KEY="sk-..."   # for memory (optional)
 
