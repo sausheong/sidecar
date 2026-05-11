@@ -64,3 +64,4 @@ sidecar task "fix the failing tests in test_app.py" --repo .
 | DELETE | `/tasks/{id}` | Delete task |
 | POST | `/demo/stress` | Generate a 500 error (triggers logs adapter) |
 | GET | `/metrics` | Prometheus metrics |
+# test Tue 12 May 2026 07:19:00 +08
