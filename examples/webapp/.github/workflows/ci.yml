@@ -1,3 +1,6 @@
+# NOTE: This workflow is intentionally failing on two seeded tests (TestCreateTask_EmptyTitleRejected,
+# TestDeleteTask_CorrectStatus) — see README. Sidecar's github-ci adapter detects this failure and fixes
+# the bugs in handler.go automatically.
 name: CI
 
 on:
