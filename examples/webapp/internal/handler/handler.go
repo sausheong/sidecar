@@ -50,7 +50,7 @@ func (h *Handler) GetTask(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	task, ok := h.store.Get(id)
 	if !ok {
-		http.Error(w, "task not found", http.StatusInternalServerError)
+		http.NotFound(w, r)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -93,7 +93,7 @@ func (h *Handler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // Stress simulates CPU load by performing a tight busy-loop for a short
