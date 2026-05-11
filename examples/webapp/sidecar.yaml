@@ -1,0 +1,55 @@
+workspace:
+  name: "sidecar-demo"
+  language: "go"
+
+signals:
+  # React to every commit
+  - adapter: git
+
+  # Nightly proactive sweep — finds missing tests, stale deps
+  - adapter: schedule
+    cron: "0 0 2 * * *"
+
+  # Watch app.log for ERROR bursts — trigger with: curl -X POST http://localhost:8080/demo/stress
+  - adapter: logs
+    poll_interval: "2s"
+    logs:
+      files:
+        - path: "logs/app.log"
+      patterns:
+        - match: "ERROR"
+          quiet_period: "2m"
+        - match: "PANIC"
+          quiet_period: "5m"
+      rate:
+        window: "30s"
+        threshold: 5
+        quiet_period: "1m"
+
+  # Watch Prometheus for HighErrorRate alert — requires Prometheus running (see README)
+  - adapter: metrics
+    poll_interval: "30s"
+    metrics:
+      provider: prometheus
+      endpoint: "http://localhost:9090"
+
+  # Uncomment after pushing to GitHub and configuring GITHUB_TOKEN:
+  # - adapter: github-ci
+  #   repo: "your-username/sidecar"
+  #   token: $GITHUB_TOKEN
+  #   poll_interval: "60s"
+  #   watch:
+  #     - "failure"
+  #     - "timed_out"
+
+autonomy:
+  test_fixes: auto-commit
+  dependency_updates: auto-commit
+  bug_fixes: pull-request
+  refactoring: suggest-only
+  log_fixes: suggest-only
+  metric_fixes: suggest-only
+
+embedding:
+  provider: openai
+  model: text-embedding-3-small

@@ -1,0 +1,16 @@
+groups:
+  - name: sidecar-demo
+    rules:
+      - alert: HighErrorRate
+        expr: |
+          rate(http_requests_total{status=~"5.."}[1m])
+          /
+          rate(http_requests_total[1m]) > 0.05
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: "High 5xx error rate on sidecar-demo"
+          description: >
+            More than 5% of requests are returning 5xx errors.
+            Hit POST /demo/stress repeatedly to trigger this.
