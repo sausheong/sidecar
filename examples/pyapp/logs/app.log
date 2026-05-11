@@ -1,8 +1,0 @@
-2026-05-12 07:14:41,294 INFO starting pyapp on :8081
-2026-05-12 07:14:53,409 INFO starting pyapp on :8081
-2026-05-12 07:14:53,416 INFO [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
- * Running on all addresses (0.0.0.0)
- * Running on http://127.0.0.1:8081
- * Running on http://172.20.10.21:8081
-2026-05-12 07:14:53,416 INFO [33mPress CTRL+C to quit[0m
-2026-05-12 07:14:55,325 INFO 127.0.0.1 - - [12/May/2026 07:14:55] "GET /health HTTP/1.1" 200 -
