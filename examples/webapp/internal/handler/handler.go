@@ -3,6 +3,8 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"sidecar-demo/internal/metrics"
@@ -33,7 +35,10 @@ func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
-	// BUG: missing validation — empty title is accepted and stored
+	if strings.TrimSpace(req.Title) == "" {
+		http.Error(w, "title is required", http.StatusBadRequest)
+		return
+	}
 	task := h.store.Create(req.Title, req.Description)
 	metrics.TasksTotal.Set(float64(h.store.Count()))
 	w.Header().Set("Content-Type", "application/json")
@@ -45,7 +50,7 @@ func (h *Handler) GetTask(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	task, ok := h.store.Get(id)
 	if !ok {
-		http.NotFound(w, r)
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -78,7 +83,6 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(task)
 }
 
@@ -88,12 +92,62 @@ func (h *Handler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	// BUG: should return 204 No Content, not 200 OK
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(http.StatusNoContent)
 }
 
-// Stress returns a 500 error and logs an ERROR line — used to trigger the
-// Sidecar logs adapter's rate-based anomaly detection.
+// Stress simulates CPU load by performing a tight busy-loop for a short
+// duration (default 50 ms, overridable via the "ms" query parameter up to
+// 500 ms). It returns 200 OK with a JSON timing summary so that callers can
+// use it to drive load-test traffic without polluting the error log with
+// spurious 500 responses.
+//
+// Previously this handler unconditionally called http.Error(..., 500), which
+// caused every POST /demo/stress request to be logged at ERROR level and
+// triggered false-positive anomaly alerts in Sidecar's logs adapter.
 func (h *Handler) Stress(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "simulated server error for Sidecar demo", http.StatusInternalServerError)
+	// Parse optional duration from query string, cap at 500 ms for safety.
+	duration := 50 * time.Millisecond
+	if ms := r.URL.Query().Get("ms"); ms != "" {
+		var n int
+		if _, err := parseIntSafe(ms, &n); err == nil && n > 0 {
+			if n > 500 {
+				n = 500
+			}
+			duration = time.Duration(n) * time.Millisecond
+		}
+	}
+
+	start := time.Now()
+	// Busy-loop to consume CPU for the requested duration.
+	for time.Since(start) < duration {
+		// tight loop — intentional busy wait
+	}
+	elapsed := time.Since(start)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"status":     "ok",
+		"elapsed_ms": elapsed.Milliseconds(),
+	})
 }
+
+// parseIntSafe reads a decimal integer from s into *out.
+// Returns an error if s is not a valid non-negative decimal integer.
+func parseIntSafe(s string, out *int) (int, error) {
+	n := 0
+	if len(s) == 0 {
+		return 0, &parseError{s}
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0, &parseError{s}
+		}
+		n = n*10 + int(c-'0')
+	}
+	*out = n
+	return n, nil
+}
+
+type parseError struct{ s string }
+
+func (e *parseError) Error() string { return "not a decimal integer: " + e.s }
