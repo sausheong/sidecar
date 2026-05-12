@@ -118,20 +118,25 @@ func BuildTriageMessage(sig adapter.Signal) string {
 	case adapter.SignalUptimeFailure:
 		url, _ := sig.Payload["url"].(string)
 		ft, _ := sig.Payload["failure_type"].(string)
+		diagSummary, _ := sig.Payload["diagnostic_summary"].(string)
+		diagNote := ""
+		if diagSummary != "" {
+			diagNote = fmt.Sprintf("\nDiagnostics: %s", diagSummary)
+		}
 		switch ft {
 		case "unreachable":
 			errMsg, _ := sig.Payload["error"].(string)
-			return fmt.Sprintf("Uptime check failed: %s is unreachable.\nError: %s\n\nShould the root cause be investigated and fixed automatically?", url, errMsg)
+			return fmt.Sprintf("Uptime check failed: %s is unreachable.\nError: %s%s\n\nIf diagnostics show DNS/TCP/network failures or all endpoints are down, this is likely infrastructure — do NOT act. If network is healthy and failure is isolated to this endpoint, investigate the code.", url, errMsg, diagNote)
 		case "wrong_status":
 			got, _ := sig.Payload["got_status"].(int)
 			want, _ := sig.Payload["expected_status"].(int)
-			return fmt.Sprintf("Uptime check failed: %s returned HTTP %d (expected %d).\n\nShould the root cause be investigated and fixed automatically?", url, got, want)
+			return fmt.Sprintf("Uptime check failed: %s returned HTTP %d (expected %d).%s\n\nIf other endpoints are healthy and DNS/TCP pass, this is likely a code issue — act. If network checks fail or all endpoints are down, this is infrastructure — do NOT act.", url, got, want, diagNote)
 		case "slow_response":
 			ms, _ := sig.Payload["elapsed_ms"].(int64)
 			threshold, _ := sig.Payload["threshold_ms"].(int)
-			return fmt.Sprintf("Performance degradation: %s responded in %dms (threshold: %dms).\n\nShould the root cause be investigated and fixed automatically?", url, ms, threshold)
+			return fmt.Sprintf("Performance degradation: %s responded in %dms (threshold: %dms).%s\n\nIf other endpoints are also slow or infrastructure checks fail, this may be a resource/network issue. If isolated to this endpoint, investigate slow queries or blocking operations.", url, ms, threshold, diagNote)
 		}
-		return fmt.Sprintf("Uptime check failed for %s. Should this be investigated automatically?", url)
+		return fmt.Sprintf("Uptime check failed for %s.%s Should this be investigated automatically?", url, diagNote)
 	default:
 		desc, _ := sig.Payload["description"].(string)
 		return fmt.Sprintf("On-demand task: %s\nShould this task be executed?", desc)

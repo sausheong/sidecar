@@ -417,39 +417,59 @@ path responsible, and apply a fix. Run tests to verify your change.`, base, prov
 		url, _ := sig.Payload["url"].(string)
 		ft, _ := sig.Payload["failure_type"].(string)
 		elapsedMs, _ := sig.Payload["elapsed_ms"].(int64)
+		diagSummary, _ := sig.Payload["diagnostic_summary"].(string)
+
+		diagBlock := ""
+		if diagSummary != "" {
+			diagBlock = fmt.Sprintf(`
+
+Diagnostic results: %s
+
+IMPORTANT — check these before touching any code:
+- If dns:FAIL or tcp:FAIL → the server process or network is the problem, not code. Check if the process is running, check firewall rules, check load balancer config.
+- If cross:FAIL (all endpoints down) → infrastructure outage, not a code bug. Do not commit any changes; notify the team.
+- If dns:ok, tcp:ok, cross shows isolated failure → this is likely a code issue. Proceed to investigate handlers and middleware.
+- If tls:FAIL → check certificate expiry; renew or update the cert configuration.
+- Review any shell/http diagnostic output above for additional clues (database, cache, dependencies).`, diagSummary)
+		}
+
 		switch ft {
 		case "unreachable":
 			errMsg, _ := sig.Payload["error"].(string)
 			return fmt.Sprintf(`%s
 
 An uptime check detected that %s is unreachable.
-Error: %s
+Error: %s%s
 
-Investigate why the endpoint is down. Check recent code changes to the server startup,
-routing, or network configuration. Apply a fix and verify the endpoint responds correctly.`, base, url, errMsg)
+Start with: bash -c 'curl -sv %s 2>&1 | head -30'
+Then check if the server process is running and inspect recent git log for changes that could affect startup or routing.`, base, url, errMsg, diagBlock, url)
+
 		case "wrong_status":
 			got, _ := sig.Payload["got_status"].(int)
 			want, _ := sig.Payload["expected_status"].(int)
 			return fmt.Sprintf(`%s
 
 An uptime check detected an unexpected HTTP status from %s.
-Got: %d  Expected: %d
+Got: %d  Expected: %d%s
 
-Investigate why the endpoint is returning the wrong status code. Check recent handler
-changes, middleware, and routing. Apply a fix and verify the response.`, base, url, got, want)
+Start with: bash -c 'curl -sv %s 2>&1 | head -40'
+Then check recent handler, middleware, and routing changes. Run the test suite to identify what is failing.`, base, url, got, want, diagBlock, url)
+
 		case "slow_response":
 			thresholdMs, _ := sig.Payload["threshold_ms"].(int)
 			return fmt.Sprintf(`%s
 
 A performance check detected that %s is responding slowly.
-Response time: %dms  Threshold: %dms
+Response time: %dms  Threshold: %dms%s
 
-Investigate the cause of latency. Check for slow queries, missing indexes, inefficient
-loops, or recently added middleware. Apply a targeted fix and verify the improvement.`, base, url, elapsedMs, thresholdMs)
+Start with: bash -c 'curl -w "%%{time_total}" -o /dev/null -s %s'
+Investigate slow database queries, missing indexes, N+1 patterns, or blocking synchronous operations on the request path. Apply a targeted fix and verify the improvement.`, base, url, elapsedMs, thresholdMs, diagBlock, url)
 		}
 		return fmt.Sprintf(`%s
 
-An uptime check failed for %s. Investigate and fix the root cause.`, base, url)
+An uptime check failed for %s.%s
+
+Investigate the root cause starting with the diagnostic results above.`, base, url, diagBlock)
 
 	default:
 		desc, _ := sig.Payload["description"].(string)

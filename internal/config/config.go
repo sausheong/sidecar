@@ -105,10 +105,19 @@ type UptimeSignalConfig struct {
 }
 
 type UptimeEndpoint struct {
-	URL          string `yaml:"url"`
-	Timeout      string `yaml:"timeout"`       // e.g. "5s"; default 10s
-	ExpectStatus int    `yaml:"expect_status"` // default 200
-	ExpectMaxMs  int    `yaml:"expect_max_ms"` // latency threshold; 0 = disabled
+	URL          string             `yaml:"url"`
+	Timeout      string             `yaml:"timeout"`       // e.g. "5s"; default 10s
+	ExpectStatus int                `yaml:"expect_status"` // default 200
+	ExpectMaxMs  int                `yaml:"expect_max_ms"` // latency threshold; 0 = disabled
+	Diagnostics  []UptimeDiagnostic `yaml:"diagnostics"`   // empty = auto (dns, tcp, tls for https)
+}
+
+// UptimeDiagnostic defines one diagnostic check to run on failure.
+// Built-in checks: dns, tcp, tls, ping, http, cross, shell.
+type UptimeDiagnostic struct {
+	Check   string `yaml:"check"`   // built-in check name or "shell" / "http"
+	URL     string `yaml:"url"`     // for check: http — alternate URL to probe
+	Command string `yaml:"command"` // for check: shell — command to run
 }
 
 type WorkspaceConfig struct {

@@ -85,6 +85,10 @@ func (a *UptimeAdapter) checkAll(ctx context.Context, out chan<- adapter.Signal)
 		if !ok {
 			continue
 		}
+		// Run diagnostics and attach results to the signal payload.
+		diag := RunDiagnostics(ctx, ep, a.endpoints)
+		sig.Payload["diagnostics"] = diag
+		sig.Payload["diagnostic_summary"] = DiagnosticSummary(diag)
 		select {
 		case <-a.stopCh:
 			return
