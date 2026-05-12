@@ -18,7 +18,76 @@ Signal source (git / CI / schedule / logs / metrics)
    Reflect (Haiku — extract learnings, update memory)
 ```
 
-Sidecar gets smarter over time: after every task it extracts architectural facts, workflow patterns, and engineering history from the work it did, storing them as vector-indexed memory. The next task starts with that context injected into the agent's prompt.
+### 1. Signal adapters
+
+Adapters run concurrently inside the daemon and fan signals into a central channel. Each adapter polls or watches its source and emits a typed `Signal` when something noteworthy happens.
+
+- **Git** — polls `git log` every 30 seconds. Records the HEAD commit at startup so only _new_ commits trigger the loop; pre-existing history is never reprocessed.
+- **GitHub / GitLab / CircleCI CI** — polls the provider API for failed or timed-out workflow runs on a configurable interval.
+- **Schedule** — fires a maintenance sweep on a cron expression (e.g. `0 0 2 * * *` for 2am daily). Uses [robfig/cron](https://github.com/robfig/cron) with second-precision support.
+- **Logs** — tails one or more log files and optionally spawns a subprocess, scanning each new line against keyword patterns (armed/disarmed with a quiet period) and a sliding-window rate threshold.
+- **Metrics** — polls Prometheus or Datadog for firing alerting rules. For Prometheus it queries `/api/v1/rules`; for Datadog it calls the monitors API filtered by configured tags.
+
+On-demand tasks (`sidecar task "…"`) bypass the adapter layer entirely and inject a signal directly into the loop.
+
+### 2. Triage
+
+Every signal passes through a single-turn Haiku agent before any code is touched. The triage agent receives a summary of the signal (commit stat, log line, CI URL, alert name) and returns a structured JSON decision:
+
+```json
+{"should_act": true, "change_type": "bug_fix", "reason": "one sentence"}
+```
+
+Valid `change_type` values: `test_fix`, `bug_fix`, `dependency_update`, `refactor`, `log_fix`, `metric_fix`, `unknown`.
+
+If `should_act` is false the task is recorded as `skipped` and no agent is run. If the triage call fails for any reason (network error, malformed JSON, empty response) Sidecar falls back to a conservative default: act, but with `suggest-only` autonomy. On-demand tasks always bypass triage.
+
+### 3. Memory retrieval
+
+If an embedding provider is configured, Sidecar queries pgvector for the top-5 most relevant memory entries before building the agent's system prompt. Relevance is measured by cosine similarity against the task description.
+
+Three memory categories are stored and retrieved independently:
+- **Semantic** — architectural facts about the codebase ("the auth layer is in `internal/auth`")
+- **Procedural** — workflow patterns ("always run `make lint` before committing")
+- **Episodic** — what happened in past tasks ("fixed a nil-pointer in handler.go in task abc123")
+
+Retrieved entries are prepended to the system prompt so the coding agent already knows the codebase's shape before it reads a single file.
+
+### 4. Coding agent
+
+The coding agent is a multi-turn Claude Sonnet session with access to four tools, gated by autonomy level:
+
+| Tool | Always available | `suggest-only` | `pull-request` / `auto-commit` |
+|------|-----------------|----------------|-------------------------------|
+| `read_file` | ✓ | ✓ | ✓ |
+| `bash` | ✓ | ✓ | ✓ |
+| `write_file` | — | — | ✓ |
+| `edit_file` | — | — | ✓ |
+
+The system prompt is signal-specific (different instructions for a git commit vs a log anomaly vs a scheduled sweep) and includes:
+- The workspace root path so the agent uses absolute file paths from the first turn
+- Retrieved memory context
+- An instruction to start exploration with `find <workspace> -name "*.go" | head -40` (or equivalent) rather than guessing filenames
+
+The agent runs up to 40 turns. Typical task flow: discover the repo layout → read relevant files → run the test suite → identify the failure → apply a targeted fix → run tests again to confirm.
+
+### 5. Output routing
+
+After the agent finishes, the output is routed based on the autonomy level resolved for that change type:
+
+| Autonomy level | What happens |
+|---------------|--------------|
+| `suggest-only` | Agent output is stored as a suggestion in the database. No files are written. |
+| `pull-request` | Modified files are committed to a new branch (`sidecar/<task-id>`), a PR is opened against the default branch, and the PR URL is recorded. |
+| `auto-commit` | Changes are committed directly to the current branch on a sidecar branch and the branch name is recorded. |
+
+In all cases the task, its events, and the final status are written to PostgreSQL so `sidecar status` always shows a full audit trail.
+
+### 6. Reflect
+
+When memory is enabled and the agent completes successfully, a short Haiku reviewer session runs asynchronously. It reads the task events and the agent's output and calls the `memory` tool to persist up to three entries — one per memory category — as vector embeddings. This step is fire-and-forget; it does not block the main loop.
+
+Sidecar gets smarter over time: each task enriches the memory store, and future tasks for the same workspace start with progressively more context about what the codebase looks like and how it behaves.
 
 ## Prerequisites
 
