@@ -74,6 +74,16 @@ func buildNotifier(nc config.NotificationConfig) Notifier {
 			return nil
 		}
 		return NewWebhookNotifier(url)
+	case "email":
+		if nc.Email.SMTPHost == "" {
+			slog.Warn("notify: email notifier has empty smtp_host, skipping")
+			return nil
+		}
+		if len(nc.Email.To) == 0 {
+			slog.Warn("notify: email notifier has no recipients, skipping")
+			return nil
+		}
+		return NewEmailNotifier(nc.Email)
 	default:
 		slog.Warn("notify: unknown provider, skipping", "provider", nc.Provider)
 		return nil

@@ -19,10 +19,36 @@ type Config struct {
 }
 
 type NotificationConfig struct {
-	Provider string   `yaml:"provider"` // "slack" | "webhook"
-	Webhook  string   `yaml:"webhook"`  // Slack: literal URL or $ENV_VAR
-	URL      string   `yaml:"url"`      // generic webhook: literal URL or $ENV_VAR
-	On       []string `yaml:"on"`       // events: skipped, suggested, completed, failed, notified
+	Provider string      `yaml:"provider"` // "slack" | "webhook" | "email"
+	Webhook  string      `yaml:"webhook"`  // Slack: literal URL or $ENV_VAR
+	URL      string      `yaml:"url"`      // generic webhook: literal URL or $ENV_VAR
+	Email    EmailConfig `yaml:"email"`    // email (SMTP) settings
+	On       []string    `yaml:"on"`       // events: skipped, suggested, completed, failed, notified
+}
+
+type EmailConfig struct {
+	SMTPHost string   `yaml:"smtp_host"`
+	SMTPPort int      `yaml:"smtp_port"` // 587 = STARTTLS (default), 465 = implicit TLS
+	Username string   `yaml:"username"`  // literal or $ENV_VAR
+	Password string   `yaml:"password"`  // literal or $ENV_VAR
+	From     string   `yaml:"from"`
+	To       []string `yaml:"to"`
+}
+
+// ResolveUsername returns the SMTP username, expanding $ENV_VAR references.
+func (e EmailConfig) ResolveUsername() string {
+	if len(e.Username) > 0 && e.Username[0] == '$' {
+		return os.Getenv(e.Username[1:])
+	}
+	return e.Username
+}
+
+// ResolvePassword returns the SMTP password, expanding $ENV_VAR references.
+func (e EmailConfig) ResolvePassword() string {
+	if len(e.Password) > 0 && e.Password[0] == '$' {
+		return os.Getenv(e.Password[1:])
+	}
+	return e.Password
 }
 
 // ResolveWebhook returns the Slack webhook URL, expanding $ENV_VAR references.
