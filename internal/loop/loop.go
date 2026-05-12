@@ -19,6 +19,7 @@ import (
 	"github.com/sausheong/sidecar/internal/adapter"
 	"github.com/sausheong/sidecar/internal/config"
 	"github.com/sausheong/sidecar/internal/memory"
+	"github.com/sausheong/sidecar/internal/notify"
 	"github.com/sausheong/sidecar/internal/output"
 	"github.com/sausheong/sidecar/internal/store"
 	"github.com/sausheong/sidecar/internal/triage"
@@ -32,6 +33,7 @@ const (
 	StatusFailed    = "failed"
 	StatusSkipped   = "skipped"   // triage decided no action needed
 	StatusSuggested = "suggested" // suggest-only output, no code committed
+	StatusNotified  = "notified"  // notify autonomy level — notifications sent, no agent run
 )
 
 // Models holds the resolved model names for each agent role.
@@ -59,13 +61,14 @@ func ResolveModels(cfg *config.Config) Models {
 // Loop is the core improvement loop that wraps a Harness runtime invocation
 // for a single incoming Signal.
 type Loop struct {
-	db        *store.DB
-	workspace *store.Workspace
-	cfg       *config.Config
-	repoPath  string
-	provider  llm.LLMProvider
-	embedding memory.EmbeddingProvider // nil when memory is not configured
-	memTool   *harnessmem.MemoryTool   // nil when embedding is nil
+	db         *store.DB
+	workspace  *store.Workspace
+	cfg        *config.Config
+	repoPath   string
+	provider   llm.LLMProvider
+	embedding  memory.EmbeddingProvider // nil when memory is not configured
+	memTool    *harnessmem.MemoryTool   // nil when embedding is nil
+	dispatcher *notify.Dispatcher       // nil when no notifications configured
 }
 
 // New constructs a Loop. Pass nil for embedding to disable memory retrieval and reviewer-driven memory writes.
@@ -76,13 +79,14 @@ func New(db *store.DB, workspace *store.Workspace, cfg *config.Config, repoPath 
 		memTool = &harnessmem.MemoryTool{Store: adapter}
 	}
 	return &Loop{
-		db:        db,
-		workspace: workspace,
-		cfg:       cfg,
-		repoPath:  repoPath,
-		provider:  anthropic.NewAnthropicProvider(os.Getenv("ANTHROPIC_API_KEY"), ""),
-		embedding: embedding,
-		memTool:   memTool,
+		db:         db,
+		workspace:  workspace,
+		cfg:        cfg,
+		repoPath:   repoPath,
+		provider:   anthropic.NewAnthropicProvider(os.Getenv("ANTHROPIC_API_KEY"), ""),
+		embedding:  embedding,
+		memTool:    memTool,
+		dispatcher: notify.NewDispatcher(cfg.Notifications),
 	}
 }
 
@@ -117,7 +121,20 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 	})
 	if !tr.ShouldAct {
 		slog.Info("sidecar skipping signal", "reason", tr.Reason, "task", task.ID)
-		return l.db.UpdateTaskStatus(ctx, task.ID, StatusSkipped)
+		_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusSkipped)
+		l.dispatcher.Fire(ctx, notify.EventSkipped, sig, task)
+		return nil
+	}
+
+	// ── Notify-only autonomy ─────────────────────────────────────────────────
+	// When autonomy is "notify", skip the coding agent entirely and fire
+	// notifications. This is the right choice for infra/network failures where
+	// no code change will help — a human needs to be alerted instead.
+	if tr.AutonomyLevel == "notify" {
+		slog.Info("sidecar notifying (no agent run)", "task", task.ID, "change_type", tr.ChangeType)
+		_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusNotified)
+		l.dispatcher.Fire(ctx, notify.EventNotified, sig, task)
+		return nil
 	}
 
 	// ── Memory retrieval ─────────────────────────────────────────────────────────
@@ -213,6 +230,7 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 	}
 	if agentErr != nil {
 		_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusFailed)
+		l.dispatcher.Fire(ctx, notify.EventFailed, sig, task)
 		return fmt.Errorf("agent error: %w", agentErr)
 	}
 
@@ -222,20 +240,23 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		summary := textBuf.String()
 		_ = l.db.AppendTaskEvent(ctx, task.ID, "suggestion", map[string]any{"summary": summary})
 		slog.Info("sidecar suggestion recorded", "task", task.ID, "change_type", tr.ChangeType)
-		task.Status = StatusSuggested
-		return l.db.UpdateTaskStatus(ctx, task.ID, StatusSuggested)
+		_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusSuggested)
+		l.dispatcher.Fire(ctx, notify.EventSuggested, sig, task)
+		return nil
 
 	case "pull-request":
 		out := output.New(l.repoPath)
 		branch, err := out.CommitBranch(task.ID.String(), "sidecar: "+task.Summary)
 		if err != nil {
 			_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusFailed)
+			l.dispatcher.Fire(ctx, notify.EventFailed, sig, task)
 			return err
 		}
 		if branch == output.BranchNoChanges {
 			slog.Info("sidecar: no changes to commit", "task", task.ID)
-			task.Status = StatusCompleted
-			return l.db.UpdateTaskStatus(ctx, task.ID, StatusCompleted)
+			_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusCompleted)
+			l.dispatcher.Fire(ctx, notify.EventCompleted, sig, task)
+			return nil
 		}
 		repo, token := l.resolveRepoAndToken(sig)
 		if repo != "" {
@@ -248,21 +269,24 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 				slog.Info("sidecar PR created", "url", prURL, "task", task.ID)
 			}
 		}
-		task.Status = StatusCompleted
-		return l.db.UpdateTaskStatus(ctx, task.ID, StatusCompleted)
+		_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusCompleted)
+		l.dispatcher.Fire(ctx, notify.EventCompleted, sig, task)
+		return nil
 
 	default: // "auto-commit"
 		out := output.New(l.repoPath)
 		branch, err := out.CommitBranch(task.ID.String(), "sidecar: "+task.Summary)
 		if err != nil {
 			_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusFailed)
+			l.dispatcher.Fire(ctx, notify.EventFailed, sig, task)
 			return err
 		}
 		if branch != output.BranchNoChanges {
 			slog.Info("sidecar committed changes", "branch", branch, "task", task.ID)
 		}
-		task.Status = StatusCompleted
-		return l.db.UpdateTaskStatus(ctx, task.ID, StatusCompleted)
+		_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusCompleted)
+		l.dispatcher.Fire(ctx, notify.EventCompleted, sig, task)
+		return nil
 	}
 }
 

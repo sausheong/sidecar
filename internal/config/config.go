@@ -9,12 +9,36 @@ import (
 )
 
 type Config struct {
-	Workspace WorkspaceConfig `yaml:"workspace"`
-	Signals   []SignalConfig  `yaml:"signals"`
-	Autonomy  AutonomyPolicy  `yaml:"autonomy"`
-	Models    ModelConfig     `yaml:"models"`
-	Scope     ScopeConfig     `yaml:"scope"`
-	Embedding EmbeddingConfig `yaml:"embedding"`
+	Workspace     WorkspaceConfig      `yaml:"workspace"`
+	Signals       []SignalConfig       `yaml:"signals"`
+	Autonomy      AutonomyPolicy       `yaml:"autonomy"`
+	Models        ModelConfig          `yaml:"models"`
+	Scope         ScopeConfig          `yaml:"scope"`
+	Embedding     EmbeddingConfig      `yaml:"embedding"`
+	Notifications []NotificationConfig `yaml:"notifications"`
+}
+
+type NotificationConfig struct {
+	Provider string   `yaml:"provider"` // "slack" | "webhook"
+	Webhook  string   `yaml:"webhook"`  // Slack: literal URL or $ENV_VAR
+	URL      string   `yaml:"url"`      // generic webhook: literal URL or $ENV_VAR
+	On       []string `yaml:"on"`       // events: skipped, suggested, completed, failed, notified
+}
+
+// ResolveWebhook returns the Slack webhook URL, expanding $ENV_VAR references.
+func (n NotificationConfig) ResolveWebhook() string {
+	if len(n.Webhook) > 0 && n.Webhook[0] == '$' {
+		return os.Getenv(n.Webhook[1:])
+	}
+	return n.Webhook
+}
+
+// ResolveURL returns the generic webhook URL, expanding $ENV_VAR references.
+func (n NotificationConfig) ResolveURL() string {
+	if len(n.URL) > 0 && n.URL[0] == '$' {
+		return os.Getenv(n.URL[1:])
+	}
+	return n.URL
 }
 
 type EmbeddingConfig struct {
@@ -127,6 +151,7 @@ var validAutonomyLevels = map[string]bool{
 	"auto-commit":  true,
 	"pull-request": true,
 	"suggest-only": true,
+	"notify":       true,
 }
 
 func ValidAutonomyLevel(s string) bool {
