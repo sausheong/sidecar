@@ -277,11 +277,55 @@ Three failure modes each produce a distinct signal:
 
 | Failure | `failure_type` | What the agent receives |
 |---------|---------------|------------------------|
-| Can't connect | `unreachable` | URL + error message |
-| Wrong HTTP status | `wrong_status` | URL + got/expected status codes |
-| Too slow | `slow_response` | URL + actual ms + threshold ms |
+| Can't connect | `unreachable` | URL + error message + diagnostics |
+| Wrong HTTP status | `wrong_status` | URL + got/expected status codes + diagnostics |
+| Too slow | `slow_response` | URL + actual ms + threshold ms + diagnostics |
 
-The coding agent investigates by reading recent handler, routing, and middleware changes, then proposes or commits a fix. Performance regressions typically lead it to look for missing database indexes, N+1 queries, or recently added synchronous operations on hot paths.
+#### Diagnostics
+
+On every failure, Sidecar automatically runs a set of diagnostic checks and includes the results in the signal before triage runs. This lets the triage model decide whether the failure is an infrastructure problem (no agent needed — just notify) or a code problem (agent should investigate).
+
+**Default checks** (run automatically when `diagnostics:` is omitted):
+
+| Check | `check:` value | What it does |
+|-------|---------------|-------------|
+| DNS | `dns` | Resolves the hostname — failure indicates DNS or load-balancer problem |
+| TCP | `tcp` | Opens a TCP connection to host:port — failure indicates server process down or firewall |
+| TLS | `tls` | Validates the certificate and checks expiry (auto-run for `https://` only) |
+| Cross-endpoint | `cross` | Probes all other configured endpoints — all down indicates infrastructure outage |
+
+**Optional built-in checks:**
+
+| Check | `check:` value | What it does |
+|-------|---------------|-------------|
+| Ping | `ping` | ICMP reachability via system `ping` |
+| Alternate HTTP | `http` | GET a different URL (e.g. `/ready` when `/health` fails) |
+| Shell command | `shell` | Run any command and capture output (`pg_isready`, `redis-cli ping`, etc.) |
+
+**How diagnostics influence triage:**
+
+- `cross:FAIL` (all endpoints down) → infrastructure outage, triage sets `should_act: false`, notification fired instead
+- `dns:FAIL` or `tcp:FAIL` → network or process issue, not code; triage leans toward `should_act: false`
+- `dns:ok`, `tcp:ok`, `cross` shows isolated failure → likely a code bug, agent investigates
+- `tls:FAIL` → certificate expired or expiring; agent checks cert config
+
+**Custom diagnostics example** — check database, cache, and an alternate health path:
+
+```yaml
+diagnostics:
+  - check: dns
+  - check: tcp
+  - check: tls
+  - check: cross
+  - check: shell
+    command: "pg_isready -h db.internal -p 5432"
+  - check: shell
+    command: "redis-cli -h redis.internal ping"
+  - check: http
+    url: "https://api.example.com/ready"
+```
+
+The coding agent is given the full diagnostic summary and explicit rules in its system prompt: it runs infrastructure checks first with `bash`, and only reads source code if the network and dependency checks come back clean.
 
 ## Prerequisites
 
@@ -414,6 +458,19 @@ signals:
         - url: "https://api.example.com/health"
           timeout: "5s"
           expect_status: 200
+          # diagnostics run automatically on failure (dns, tcp, tls, cross)
+          # add custom checks to troubleshoot dependencies:
+          diagnostics:
+            - check: dns
+            - check: tcp
+            - check: tls
+            - check: cross          # are other endpoints also down?
+            - check: shell
+              command: "pg_isready -h db.internal -p 5432"
+            - check: shell
+              command: "redis-cli -h redis.internal ping"
+            - check: http
+              url: "https://api.example.com/ready"
         - url: "https://api.example.com/users"
           timeout: "3s"
           expect_status: 200
