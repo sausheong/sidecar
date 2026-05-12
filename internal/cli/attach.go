@@ -17,6 +17,7 @@ import (
 	gitlabciadapter "github.com/sausheong/sidecar/internal/adapter/gitlabci"
 	logsadapter "github.com/sausheong/sidecar/internal/adapter/logs"
 	metricsadapter "github.com/sausheong/sidecar/internal/adapter/metrics"
+	uptimeadapter "github.com/sausheong/sidecar/internal/adapter/uptime"
 	"github.com/sausheong/sidecar/internal/adapter/schedule"
 	"github.com/sausheong/sidecar/internal/config"
 	"github.com/sausheong/sidecar/internal/daemon"
@@ -131,6 +132,8 @@ func buildAdapters(repoPath string, cfg *config.Config) []adapter.Adapter {
 			adapters = append(adapters, circleciadapter.New(sig.Repo, token, interval, sig.Watch))
 		case "logs":
 			adapters = append(adapters, logsadapter.New(sig))
+		case "uptime":
+			adapters = append(adapters, uptimeadapter.New(sig))
 		case "metrics":
 			if a, err := metricsadapter.NewMetricsAdapter(sig); err == nil {
 				adapters = append(adapters, a)

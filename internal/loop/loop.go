@@ -389,6 +389,44 @@ Details: %s
 Investigate the root cause in the codebase. Check recent changes, identify the code
 path responsible, and apply a fix. Run tests to verify your change.`, base, provider, name, message)
 
+	case adapter.SignalUptimeFailure:
+		url, _ := sig.Payload["url"].(string)
+		ft, _ := sig.Payload["failure_type"].(string)
+		elapsedMs, _ := sig.Payload["elapsed_ms"].(int64)
+		switch ft {
+		case "unreachable":
+			errMsg, _ := sig.Payload["error"].(string)
+			return fmt.Sprintf(`%s
+
+An uptime check detected that %s is unreachable.
+Error: %s
+
+Investigate why the endpoint is down. Check recent code changes to the server startup,
+routing, or network configuration. Apply a fix and verify the endpoint responds correctly.`, base, url, errMsg)
+		case "wrong_status":
+			got, _ := sig.Payload["got_status"].(int)
+			want, _ := sig.Payload["expected_status"].(int)
+			return fmt.Sprintf(`%s
+
+An uptime check detected an unexpected HTTP status from %s.
+Got: %d  Expected: %d
+
+Investigate why the endpoint is returning the wrong status code. Check recent handler
+changes, middleware, and routing. Apply a fix and verify the response.`, base, url, got, want)
+		case "slow_response":
+			thresholdMs, _ := sig.Payload["threshold_ms"].(int)
+			return fmt.Sprintf(`%s
+
+A performance check detected that %s is responding slowly.
+Response time: %dms  Threshold: %dms
+
+Investigate the cause of latency. Check for slow queries, missing indexes, inefficient
+loops, or recently added middleware. Apply a targeted fix and verify the improvement.`, base, url, elapsedMs, thresholdMs)
+		}
+		return fmt.Sprintf(`%s
+
+An uptime check failed for %s. Investigate and fix the root cause.`, base, url)
+
 	default:
 		desc, _ := sig.Payload["description"].(string)
 		return fmt.Sprintf(`%s
@@ -419,6 +457,10 @@ func userMessage(sig adapter.Signal) string {
 		name, _ := sig.Payload["alert_name"].(string)
 		provider, _ := sig.Payload["provider"].(string)
 		return fmt.Sprintf("Metrics alert %q fired in %s. Investigate and fix.", name, provider)
+	case adapter.SignalUptimeFailure:
+		url, _ := sig.Payload["url"].(string)
+		ft, _ := sig.Payload["failure_type"].(string)
+		return fmt.Sprintf("Uptime check failed for %s (%s). Investigate and fix.", url, ft)
 	default:
 		desc, _ := sig.Payload["description"].(string)
 		if desc == "" {
@@ -453,6 +495,10 @@ func summarize(sig adapter.Signal) string {
 	case adapter.SignalMetricAlert:
 		name, _ := sig.Payload["alert_name"].(string)
 		return fmt.Sprintf("fix metric alert: %s", name)
+	case adapter.SignalUptimeFailure:
+		url, _ := sig.Payload["url"].(string)
+		ft, _ := sig.Payload["failure_type"].(string)
+		return fmt.Sprintf("fix uptime failure: %s (%s)", url, ft)
 	default:
 		desc, _ := sig.Payload["description"].(string)
 		runes := []rune(desc)

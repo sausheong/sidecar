@@ -11,6 +11,7 @@ const (
 	SignalCIFailure    SignalType = "ci.failure"
 	SignalLogAnomaly   SignalType = "log.anomaly"
 	SignalMetricAlert  SignalType = "metric.alert"
+	SignalUptimeFailure SignalType = "uptime.failure"
 )
 
 type Signal struct {

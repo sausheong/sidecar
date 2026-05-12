@@ -374,6 +374,19 @@ signals:
       provider: prometheus
       endpoint: "http://localhost:9090"
 
+  # Poll HTTP endpoints for uptime and latency
+  - adapter: uptime
+    poll_interval: "30s"
+    uptime:
+      endpoints:
+        - url: "https://api.example.com/health"
+          timeout: "5s"
+          expect_status: 200
+        - url: "https://api.example.com/users"
+          timeout: "3s"
+          expect_status: 200
+          expect_max_ms: 500    # fire if response takes >500ms
+
 # How much autonomy Sidecar has per change type
 autonomy:
   dependency_updates: auto-commit
@@ -383,6 +396,7 @@ autonomy:
   schema_changes: suggest-only
   log_fixes: suggest-only
   metric_fixes: suggest-only
+  uptime_fixes: suggest-only
 
 # Model overrides (defaults shown)
 models:
@@ -471,6 +485,7 @@ When `embedding` is configured in `sidecar.yaml`, Sidecar maintains a persistent
 | Logs | `logs` | Keyword matches and rate spikes in log files or process output |
 | Datadog | `metrics` + `provider: datadog` | Triggered Datadog monitors |
 | Prometheus | `metrics` + `provider: prometheus` | Firing Prometheus alerting rules |
+| Uptime | `uptime` | HTTP endpoints that are down, return wrong status codes, or exceed a latency threshold |
 
 ## Demo Projects
 

@@ -50,6 +50,17 @@ type MetricsSignalConfig struct {
 	AlertNames []string `yaml:"alert_names"` // optional allowlist; empty = all alerts
 }
 
+type UptimeSignalConfig struct {
+	Endpoints []UptimeEndpoint `yaml:"endpoints"`
+}
+
+type UptimeEndpoint struct {
+	URL          string `yaml:"url"`
+	Timeout      string `yaml:"timeout"`       // e.g. "5s"; default 10s
+	ExpectStatus int    `yaml:"expect_status"` // default 200
+	ExpectMaxMs  int    `yaml:"expect_max_ms"` // latency threshold; 0 = disabled
+}
+
 type WorkspaceConfig struct {
 	Name     string `yaml:"name"`
 	Language string `yaml:"language"`
@@ -64,6 +75,7 @@ type SignalConfig struct {
 	PollInterval string              `yaml:"poll_interval"` // e.g. "60s", default "60s"
 	Logs         LogsSignalConfig    `yaml:"logs"`
 	Metrics      MetricsSignalConfig `yaml:"metrics"`
+	Uptime       UptimeSignalConfig  `yaml:"uptime"`
 }
 
 type AutonomyPolicy struct {
@@ -74,6 +86,7 @@ type AutonomyPolicy struct {
 	SchemaChanges     string `yaml:"schema_changes"`
 	LogFixes          string `yaml:"log_fixes"`
 	MetricFixes       string `yaml:"metric_fixes"`
+	UptimeFixes       string `yaml:"uptime_fixes"`
 }
 
 type ModelConfig struct {

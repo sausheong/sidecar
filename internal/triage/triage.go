@@ -115,6 +115,23 @@ func BuildTriageMessage(sig adapter.Signal) string {
 		provider, _ := sig.Payload["provider"].(string)
 		return fmt.Sprintf("Metrics alert fired in %s:\nAlert: %s\nDetails: %s\n\nShould this be investigated and fixed automatically?",
 			provider, name, message)
+	case adapter.SignalUptimeFailure:
+		url, _ := sig.Payload["url"].(string)
+		ft, _ := sig.Payload["failure_type"].(string)
+		switch ft {
+		case "unreachable":
+			errMsg, _ := sig.Payload["error"].(string)
+			return fmt.Sprintf("Uptime check failed: %s is unreachable.\nError: %s\n\nShould the root cause be investigated and fixed automatically?", url, errMsg)
+		case "wrong_status":
+			got, _ := sig.Payload["got_status"].(int)
+			want, _ := sig.Payload["expected_status"].(int)
+			return fmt.Sprintf("Uptime check failed: %s returned HTTP %d (expected %d).\n\nShould the root cause be investigated and fixed automatically?", url, got, want)
+		case "slow_response":
+			ms, _ := sig.Payload["elapsed_ms"].(int64)
+			threshold, _ := sig.Payload["threshold_ms"].(int)
+			return fmt.Sprintf("Performance degradation: %s responded in %dms (threshold: %dms).\n\nShould the root cause be investigated and fixed automatically?", url, ms, threshold)
+		}
+		return fmt.Sprintf("Uptime check failed for %s. Should this be investigated automatically?", url)
 	default:
 		desc, _ := sig.Payload["description"].(string)
 		return fmt.Sprintf("On-demand task: %s\nShould this task be executed?", desc)
@@ -156,6 +173,8 @@ func ResolveAutonomy(changeType string, cfg *config.Config) string {
 		level = cfg.Autonomy.LogFixes
 	case "metric_fix":
 		level = cfg.Autonomy.MetricFixes
+	case "uptime_fix":
+		level = cfg.Autonomy.UptimeFixes
 	}
 	if level == "" {
 		return "suggest-only"
