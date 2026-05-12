@@ -37,18 +37,18 @@ go build -o sidecar ./cmd/sidecar
 
 ## Database Setup
 
-```sql
--- In your PostgreSQL instance:
-CREATE DATABASE sidecar;
-\c sidecar
-CREATE EXTENSION IF NOT EXISTS vector;
-```
-
-Sidecar runs migrations automatically on `attach`. Point it at your database:
-
 ```bash
-export SIDECAR_DB_URL="postgres://user:password@localhost/sidecar"
+docker run -d --name sidecar-db \
+  -e POSTGRES_USER=sidecar \
+  -e POSTGRES_PASSWORD=sidecar \
+  -e POSTGRES_DB=sidecar \
+  -p 5432:5432 \
+  pgvector/pgvector:pg17
 ```
+
+Or point `SIDECAR_DB_URL` at any PostgreSQL 15+ instance with pgvector (including [Neon](https://neon.tech) free tier).
+
+Sidecar runs migrations automatically on `attach`.
 
 ## Environment Variables
 
@@ -158,14 +158,6 @@ models:
   coding: "anthropic/claude-sonnet-4-6"
   triage: "anthropic/claude-haiku-4-5-20251001"
 
-# Scope (optional) — restrict which files the agent can touch
-scope:
-  include:
-    - "internal/**"
-    - "cmd/**"
-  exclude:
-    - "vendor/**"
-
 # Embedding for persistent memory (optional but recommended)
 embedding:
   provider: openai        # "openai" | "voyage"
@@ -221,15 +213,6 @@ suggested  ci.failure       fix CI failure in CI @ def456    2026-05-09 13:15:44
 skipped    schedule.tick    proactive sweep                  2026-05-09 02:00:01
 ```
 
-### `sidecar ask <question>`
-
-Query the workspace's accumulated memory using natural language. Requires embedding to be configured.
-
-```bash
-sidecar ask "how does authentication work?"
-sidecar ask "which areas are most fragile?" --repo /path/to/project
-```
-
 ## Memory System
 
 When `embedding` is configured in `sidecar.yaml`, Sidecar maintains a persistent vector memory for each workspace:
@@ -237,7 +220,6 @@ When `embedding` is configured in `sidecar.yaml`, Sidecar maintains a persistent
 - **After every task:** a Haiku reflect step extracts architectural facts (semantic), workflow patterns (procedural), and a task summary (episodic) from what the agent did, storing them as 1024-dimensional embeddings in PostgreSQL via pgvector.
 - **Before every task:** the most relevant memory entries are retrieved by semantic similarity and injected into the agent's system prompt.
 - **Scheduled sweeps:** the idle sweep prioritises fragile areas and under-tested code paths from memory before falling back to generic checks.
-- **`sidecar ask`:** retrieves all three memory categories and synthesises a natural-language answer with a single Haiku call.
 
 ### Supported Embedding Providers
 
@@ -259,75 +241,69 @@ When `embedding` is configured in `sidecar.yaml`, Sidecar maintains a persistent
 | Datadog | `metrics` + `provider: datadog` | Triggered Datadog monitors |
 | Prometheus | `metrics` + `provider: prometheus` | Firing Prometheus alerting rules |
 
-## Example Workflow
+## Demo Projects
 
-```bash
-# 1. Set up environment
-export SIDECAR_DB_URL="postgres://localhost/sidecar"
-export ANTHROPIC_API_KEY="sk-ant-..."
-export OPENAI_API_KEY="sk-..."        # for memory
+Two minimal webapps in `examples/` are purpose-built to exercise every Sidecar signal adapter. Each ships with seeded bugs, intentionally failing tests, and an error-generating endpoint so you can see Sidecar react and fix things out of the box.
 
-# 2. Add sidecar.yaml to your project
-cat > myproject/sidecar.yaml << 'EOF'
-workspace:
-  name: myproject
-signals:
-  - adapter: git
-  - adapter: schedule
-    cron: "0 0 2 * * *"
-autonomy:
-  test_fixes: auto-commit
-  bug_fixes: pull-request
-embedding:
-  provider: openai
-EOF
+### Go demo (`examples/goapp`)
 
-# 3. Start the daemon
-cd myproject
-sidecar attach .
+A Go task-tracker API on port 8080.
 
-# 4. Submit a one-off task
-sidecar task "add rate limiting to the API"
-
-# 5. Check status
-sidecar status
-
-# 6. Ask about the codebase (after some tasks have run)
-sidecar ask "what are the most fragile parts of this codebase?"
-```
-
-## Demo Project
-
-`examples/webapp/` is a minimal Go task-tracker API purpose-built to exercise every Sidecar signal adapter. It ships with seeded bugs, intentionally failing tests, and an error-generating endpoint so you can see Sidecar react and fix things out of the box.
-
-| Seeded issue | Sidecar adapter that catches it |
+| Seeded issue | Adapter that catches it |
 |---|---|
-| `DELETE /tasks/{id}` returns 200 instead of 204 | CI adapter (failing test) |
-| `POST /tasks` accepts empty title | CI adapter (failing test) |
-| Missing test for `PUT /tasks/{id}` | Schedule adapter (nightly sweep) |
+| `DELETE /tasks/{id}` returns 200 instead of 204 | CI adapter / on-demand task |
+| `POST /tasks` accepts empty title | CI adapter / on-demand task |
 | `POST /demo/stress` generates ERROR log bursts | Logs adapter |
 | `HighErrorRate` Prometheus alerting rule | Metrics adapter |
 
-**Quick start:**
-
 ```bash
-# 1. Start the webapp
-cd examples/webapp
+# Start the webapp
+cd examples/goapp
 go run ./cmd/webapp          # listens on :8080
 
-# 2. Attach Sidecar (in another terminal, from examples/webapp/)
-export SIDECAR_DB_URL="postgres://sidecar:sidecar@localhost:5433/sidecar"
+# Attach Sidecar (in another terminal)
+export SIDECAR_DB_URL="postgres://sidecar:sidecar@localhost:5432/sidecar?sslmode=disable"
 export ANTHROPIC_API_KEY="sk-ant-..."
 sidecar attach .
 
-# 3. Trigger the logs adapter — 6 hits in 30 seconds
+# Trigger the logs adapter
 for i in $(seq 1 6); do curl -s -X POST http://localhost:8080/demo/stress; done
 
-# 4. Run an on-demand task
-sidecar task "review test coverage and add missing tests" --repo .
+# Run an on-demand task
+sidecar task "fix the failing tests" --repo .
 ```
 
-See `examples/webapp/README.md` for the full guide including Prometheus setup and how to wire the GitHub CI adapter.
+See `examples/goapp/README.md` for the full guide.
+
+### Python demo (`examples/pyapp`)
+
+A Flask task-tracker API on port 8081 with the same bugs and adapters as the Go demo.
+
+| Seeded issue | Adapter that catches it |
+|---|---|
+| `DELETE /tasks/{id}` returns 200 instead of 204 | CI adapter / on-demand task |
+| `POST /tasks` accepts empty title | CI adapter / on-demand task |
+| `POST /demo/stress` generates ERROR log bursts | Logs adapter |
+
+```bash
+# Install and start
+cd examples/pyapp
+pip install -r requirements.txt
+python app.py                # listens on :8081
+
+# Attach Sidecar
+export SIDECAR_DB_URL="postgres://sidecar:sidecar@localhost:5432/sidecar?sslmode=disable"
+export ANTHROPIC_API_KEY="sk-ant-..."
+sidecar attach .
+
+# Run the tests (3 fail on the seeded bugs)
+pytest test_app.py -v
+
+# Let Sidecar fix them
+sidecar task "fix the 3 failing pytest tests in test_app.py" --repo .
+```
+
+See `examples/pyapp/README.md` for the full guide.
 
 ## Architecture Notes
 
@@ -336,4 +312,4 @@ See `examples/webapp/README.md` for the full guide including Prometheus setup an
 - The `sidecar.yaml` in the target repo is the only coupling between the software and its agent — no code changes required in the managed project
 - Each signal triggers an independent task; tasks do not interfere with each other
 - The coding agent has access to `read_file`, `write_file`, `edit_file`, and `bash` tools; write tools are gated by autonomy level
-# test
+- Language-agnostic: Sidecar operates at the file, git, and shell level — any language works
