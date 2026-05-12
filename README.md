@@ -89,6 +89,168 @@ When memory is enabled and the agent completes successfully, a short Haiku revie
 
 Sidecar gets smarter over time: each task enriches the memory store, and future tasks for the same workspace start with progressively more context about what the codebase looks like and how it behaves.
 
+## How to Use
+
+### Step 1 — Install Sidecar
+
+```bash
+git clone https://github.com/sausheong/sidecar
+cd sidecar
+go build -o /usr/local/bin/sidecar ./cmd/sidecar
+```
+
+### Step 2 — Start a database
+
+Sidecar needs PostgreSQL with the pgvector extension for task storage and memory.
+
+```bash
+docker run -d --name sidecar-db \
+  -e POSTGRES_USER=sidecar \
+  -e POSTGRES_PASSWORD=sidecar \
+  -e POSTGRES_DB=sidecar \
+  -p 5432:5432 \
+  pgvector/pgvector:pg17
+
+export SIDECAR_DB_URL="postgres://sidecar:sidecar@localhost:5432/sidecar?sslmode=disable"
+```
+
+Migrations run automatically on first `attach`. Neon free tier also works as a managed alternative.
+
+### Step 3 — Set your API keys
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."     # required — used for triage (Haiku) and coding (Sonnet)
+export OPENAI_API_KEY="sk-..."            # optional — used for memory embeddings
+```
+
+### Step 4 — Add `sidecar.yaml` to your project
+
+Place the file in the root of the repo you want Sidecar to manage. A minimal config:
+
+```yaml
+workspace:
+  name: "my-api"
+  language: "go"
+
+signals:
+  - adapter: git          # react to every new commit
+
+autonomy:
+  bug_fixes: pull-request
+  test_fixes: auto-commit
+  refactoring: suggest-only
+```
+
+Start simple — add more adapters and tighten autonomy once you trust the output.
+
+### Step 5 — Attach
+
+```bash
+cd /path/to/your/project
+sidecar attach .
+```
+
+Sidecar prints a line for each adapter it starts, then runs silently until a signal fires. Leave it running in the background (`nohup`, `systemd`, `tmux`, etc.).
+
+```
+Sidecar attached to /path/to/your/project — watching 2 adapter(s)
+```
+
+### Step 6 — Trigger your first task
+
+Make a commit and watch sidecar react:
+
+```bash
+# Any commit triggers the git adapter
+git commit -m "add user registration endpoint"
+
+# Check what sidecar decided
+sidecar status
+```
+
+Or run a task on demand without waiting for a signal:
+
+```bash
+sidecar task "add input validation to the registration handler"
+sidecar task "write tests for the auth middleware"
+sidecar task "find and fix any TODO comments in the codebase"
+```
+
+### Step 7 — Review the output
+
+```bash
+sidecar status
+```
+
+```
+STATUS     SIGNAL        SUMMARY                            CREATED
+suggested  git.commit    review commit 3fa12c8a             2026-05-12 08:01:15
+completed  ondemand      add input validation to handler    2026-05-12 07:55:02
+skipped    schedule.tick proactive sweep                    2026-05-12 02:00:01
+```
+
+- **`completed`** — changes were committed or a PR was opened
+- **`suggested`** — Sidecar wrote up what it would do; no files were changed (suggest-only autonomy)
+- **`skipped`** — triage decided the signal didn't warrant action (e.g. docs-only commit)
+- **`failed`** — the agent hit an error; check the logs
+
+If autonomy is `pull-request`, review and merge the branch Sidecar opened. If it's `auto-commit`, pull the changes. If it's `suggest-only`, read the suggestion and decide whether to act on it.
+
+### Tuning autonomy
+
+Start with everything on `suggest-only`, observe a few tasks, then promote to `pull-request` or `auto-commit` for change types you trust:
+
+```yaml
+autonomy:
+  test_fixes: auto-commit      # low risk — tests are self-verifying
+  dependency_updates: auto-commit
+  bug_fixes: pull-request      # review before merging
+  refactoring: suggest-only    # always want a human eye on this
+  schema_changes: suggest-only
+```
+
+### Adding CI integration
+
+Once you trust the git adapter, wire in CI so Sidecar also reacts to broken builds:
+
+```yaml
+signals:
+  - adapter: git
+  - adapter: github-ci
+    repo: "owner/repo"
+    token: $GITHUB_TOKEN
+    poll_interval: "60s"
+    watch:
+      - "failure"
+      - "timed_out"
+```
+
+Sidecar will read the failing workflow run, check out the commit, run tests locally, identify the root cause, and open a fix PR — all without human intervention.
+
+### Adding log and metric monitoring
+
+```yaml
+signals:
+  - adapter: logs
+    logs:
+      files:
+        - path: "logs/app.log"
+      patterns:
+        - match: "PANIC"
+          quiet_period: "10m"
+      rate:
+        window: "30s"
+        threshold: 10    # more than 10 ERROR lines in 30s → trigger
+        quiet_period: "2m"
+
+  - adapter: metrics
+    metrics:
+      provider: prometheus
+      endpoint: "http://localhost:9090"
+```
+
+When a log pattern fires or a Prometheus alert becomes active, Sidecar investigates the relevant code path and records a suggestion (or opens a PR, depending on your autonomy config for `log_fixes` / `metric_fixes`).
+
 ## Prerequisites
 
 - Go 1.25+
