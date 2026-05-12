@@ -5,7 +5,7 @@ An autonomous engineering agent that attaches to any software project as a persi
 ## How It Works
 
 ```
-Signal source (git / CI / schedule / logs / metrics)
+Signal source (git / CI / schedule / logs / metrics / uptime)
         ↓
     Triage (Haiku — should we act? what kind of change?)
         ↓
@@ -27,6 +27,7 @@ Adapters run concurrently inside the daemon and fan signals into a central chann
 - **Schedule** — fires a maintenance sweep on a cron expression (e.g. `0 0 2 * * *` for 2am daily). Uses [robfig/cron](https://github.com/robfig/cron) with second-precision support.
 - **Logs** — tails one or more log files and optionally spawns a subprocess, scanning each new line against keyword patterns (armed/disarmed with a quiet period) and a sliding-window rate threshold.
 - **Metrics** — polls Prometheus or Datadog for firing alerting rules. For Prometheus it queries `/api/v1/rules`; for Datadog it calls the monitors API filtered by configured tags.
+- **Uptime** — polls a list of HTTP endpoints on a configurable interval, emitting a signal when any endpoint is unreachable, returns an unexpected status code, or exceeds a latency threshold (`expect_max_ms`).
 
 On-demand tasks (`sidecar task "…"`) bypass the adapter layer entirely and inject a signal directly into the loop.
 
@@ -38,7 +39,7 @@ Every signal passes through a single-turn Haiku agent before any code is touched
 {"should_act": true, "change_type": "bug_fix", "reason": "one sentence"}
 ```
 
-Valid `change_type` values: `test_fix`, `bug_fix`, `dependency_update`, `refactor`, `log_fix`, `metric_fix`, `unknown`.
+Valid `change_type` values: `test_fix`, `bug_fix`, `dependency_update`, `refactor`, `log_fix`, `metric_fix`, `uptime_fix`, `unknown`.
 
 If `should_act` is false the task is recorded as `skipped` and no agent is run. If the triage call fails for any reason (network error, malformed JSON, empty response) Sidecar falls back to a conservative default: act, but with `suggest-only` autonomy. On-demand tasks always bypass triage.
 
@@ -183,10 +184,11 @@ sidecar status
 ```
 
 ```
-STATUS     SIGNAL        SUMMARY                            CREATED
-suggested  git.commit    review commit 3fa12c8a             2026-05-12 08:01:15
-completed  ondemand      add input validation to handler    2026-05-12 07:55:02
-skipped    schedule.tick proactive sweep                    2026-05-12 02:00:01
+STATUS     SIGNAL           SUMMARY                                      CREATED
+suggested  git.commit       review commit 3fa12c8a                       2026-05-12 08:01:15
+completed  ondemand.task    add input validation to handler               2026-05-12 07:55:02
+suggested  uptime.failure   fix uptime failure: /health (wrong_status)   2026-05-12 07:30:44
+skipped    schedule.tick    proactive sweep                               2026-05-12 02:00:01
 ```
 
 - **`completed`** — changes were committed or a PR was opened
@@ -250,6 +252,36 @@ signals:
 ```
 
 When a log pattern fires or a Prometheus alert becomes active, Sidecar investigates the relevant code path and records a suggestion (or opens a PR, depending on your autonomy config for `log_fixes` / `metric_fixes`).
+
+### Adding uptime and performance monitoring
+
+```yaml
+signals:
+  - adapter: uptime
+    poll_interval: "30s"
+    uptime:
+      endpoints:
+        - url: "https://api.example.com/health"
+          timeout: "5s"
+          expect_status: 200          # fire if status != 200
+        - url: "https://api.example.com/search"
+          timeout: "3s"
+          expect_status: 200
+          expect_max_ms: 500          # fire if response time > 500ms
+
+autonomy:
+  uptime_fixes: suggest-only         # or pull-request once you trust the agent
+```
+
+Three failure modes each produce a distinct signal:
+
+| Failure | `failure_type` | What the agent receives |
+|---------|---------------|------------------------|
+| Can't connect | `unreachable` | URL + error message |
+| Wrong HTTP status | `wrong_status` | URL + got/expected status codes |
+| Too slow | `slow_response` | URL + actual ms + threshold ms |
+
+The coding agent investigates by reading recent handler, routing, and middleware changes, then proposes or commits a fix. Performance regressions typically lead it to look for missing database indexes, N+1 queries, or recently added synchronous operations on hot paths.
 
 ## Prerequisites
 
