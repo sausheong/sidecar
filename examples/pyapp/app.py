@@ -63,12 +63,8 @@ def create_task():
         track(400)
         return jsonify({"error": "invalid JSON"}), 400
 
+    # BUG: missing title validation — empty title is accepted
     title = data.get("title", "")
-    # FIX (1): reject empty or whitespace-only titles
-    if not title.strip():
-        track(400)
-        return jsonify({"error": "title is required"}), 400
-
     description = data.get("description", "")
     task = store.create(title, description)
     tasks_total.set(store.count())
@@ -118,9 +114,9 @@ def delete_task(task_id):
         track(404)
         return jsonify({"error": "not found"}), 404
     tasks_total.set(store.count())
-    # FIX (2): return 204 No Content with an empty body
-    track(204)
-    return "", 204
+    # BUG: should return 204 No Content, not 200
+    track(200)
+    return jsonify({"status": "deleted"}), 200
 
 
 @app.post("/demo/stress")
