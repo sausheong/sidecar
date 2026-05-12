@@ -146,6 +146,16 @@ func BuildTriageMessage(sig adapter.Signal) string {
 // ParseTriageResponse unmarshals the triage agent's JSON response.
 func ParseTriageResponse(raw string) (TriageResult, error) {
 	raw = strings.TrimSpace(raw)
+	// Strip markdown code fences the LLM sometimes wraps around JSON.
+	if strings.HasPrefix(raw, "```") {
+		if idx := strings.Index(raw, "\n"); idx != -1 {
+			raw = raw[idx+1:]
+		}
+		if idx := strings.LastIndex(raw, "```"); idx != -1 {
+			raw = raw[:idx]
+		}
+		raw = strings.TrimSpace(raw)
+	}
 	var resp struct {
 		ShouldAct  bool   `json:"should_act"`
 		ChangeType string `json:"change_type"`
