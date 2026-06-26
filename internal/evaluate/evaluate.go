@@ -83,13 +83,35 @@ func ParseVerdict(raw string) (Verdict, error) {
 // silently bypass this gate). If baseRef is "" it falls back to "HEAD" to
 // preserve the in-repo (non-worktree) behavior.
 //
+// To see EXACTLY what the commit step will ship, we first `git add -A` (which
+// stages untracked files too) and then diff the index against base with
+// `git diff --cached <base>`. This is required because `git diff <base>` omits
+// untracked files: an agent that wrote a brand-new file without `git add` would
+// otherwise present an empty/partial diff to the evaluator and slip through,
+// while output.CommitInPlaceFrom (which also stages with `git add -A`) would
+// still commit and ship the unevaluated file. Staging here makes the gate judge
+// precisely the set of changes that gets committed.
+//
+// The `git add -A` is unconditional, mirroring CommitInPlaceFrom. For the
+// worktree path (the only path that passes a non-empty baseRef) this is wholly
+// safe — the worktree is ephemeral and gets staged with `-A` at commit time
+// anyway. For the degraded in-repo fallback (baseRef == "" → "HEAD") it does
+// touch the real index, but that path already shares its working tree with the
+// commit step and staging there is consistent with how the change ultimately
+// ships; the fallback is the accepted degraded path.
+//
 // On any setup/run error the caller should fail closed (treat as REJECT); this
 // function returns the error so the caller can record it.
 func Evaluate(ctx context.Context, provider llm.LLMProvider, model, workDir, baseRef, taskSummary string) (Verdict, error) {
 	if baseRef == "" {
 		baseRef = "HEAD"
 	}
-	diffOut, err := exec.Command("git", "-C", workDir, "diff", baseRef).CombinedOutput()
+	// Stage everything (including untracked files) so the index reflects exactly
+	// what CommitInPlaceFrom would commit.
+	if addOut, err := exec.Command("git", "-C", workDir, "add", "-A").CombinedOutput(); err != nil {
+		return Verdict{}, fmt.Errorf("git add -A: %w\n%s", err, strings.TrimSpace(string(addOut)))
+	}
+	diffOut, err := exec.Command("git", "-C", workDir, "diff", "--cached", baseRef).CombinedOutput()
 	if err != nil {
 		return Verdict{}, fmt.Errorf("git diff: %w\n%s", err, strings.TrimSpace(string(diffOut)))
 	}
