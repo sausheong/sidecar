@@ -41,6 +41,10 @@ func testSig(ft string) adapter.Signal {
 	}
 }
 
+func TestEventBudgetExceededConstant(t *testing.T) {
+	assert.Equal(t, notify.Event("budget_exceeded"), notify.EventBudgetExceeded)
+}
+
 // ── Dispatcher ────────────────────────────────────────────────────────────────
 
 func TestDispatcher_NilSafe(t *testing.T) {
