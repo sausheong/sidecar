@@ -77,6 +77,24 @@ func GateAllowsCommit(verdict evaluate.Verdict, evalErr error) bool {
 	return evalErr == nil && verdict.Pass
 }
 
+// UsageTotals accumulates token usage across an agent run's events.
+type UsageTotals struct {
+	Input  int
+	Output int
+}
+
+// Total returns the combined input+output tokens.
+func (u UsageTotals) Total() int { return u.Input + u.Output }
+
+// AccumulateUsage adds an event's reported usage to dst. Only EventDone
+// events carrying a non-nil Usage contribute; others are ignored.
+func AccumulateUsage(dst *UsageTotals, ev runtime.AgentEvent) {
+	if ev.Type == runtime.EventDone && ev.Usage != nil {
+		dst.Input += ev.Usage.InputTokens
+		dst.Output += ev.Usage.OutputTokens
+	}
+}
+
 // errString returns the error message, or "" if err is nil. Used for JSON event payloads.
 func errString(err error) string {
 	if err == nil {
