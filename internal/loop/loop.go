@@ -18,6 +18,7 @@ import (
 	"github.com/sausheong/harness/tools/file"
 	"github.com/sausheong/sidecar/internal/adapter"
 	"github.com/sausheong/sidecar/internal/config"
+	"github.com/sausheong/sidecar/internal/evaluate"
 	"github.com/sausheong/sidecar/internal/memory"
 	"github.com/sausheong/sidecar/internal/notify"
 	"github.com/sausheong/sidecar/internal/output"
@@ -38,8 +39,9 @@ const (
 
 // Models holds the resolved model names for each agent role.
 type Models struct {
-	Coding string
-	Triage string
+	Coding    string
+	Triage    string
+	Evaluator string
 }
 
 // ResolveModels returns the effective model names from cfg, falling back to
@@ -55,7 +57,23 @@ func ResolveModels(cfg *config.Config) Models {
 	if cfg.Models.Triage != "" {
 		m.Triage = cfg.Models.Triage
 	}
+	m.Evaluator = m.Coding
+	if cfg.Models.Evaluator != "" {
+		m.Evaluator = cfg.Models.Evaluator
+	}
 	return m
+}
+
+// ShipsCode reports whether an autonomy level results in committed code and
+// therefore must pass the evaluator gate.
+func ShipsCode(autonomyLevel string) bool {
+	return autonomyLevel == "auto-commit" || autonomyLevel == "pull-request"
+}
+
+// GateAllowsCommit reports whether the evaluator verdict permits committing.
+// Fails closed: any evaluator error blocks the commit regardless of verdict.
+func GateAllowsCommit(verdict evaluate.Verdict, evalErr error) bool {
+	return evalErr == nil && verdict.Pass
 }
 
 // Loop is the core improvement loop that wraps a Harness runtime invocation

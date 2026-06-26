@@ -1,13 +1,41 @@
 package loop_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/sausheong/sidecar/internal/adapter"
 	"github.com/sausheong/sidecar/internal/config"
+	"github.com/sausheong/sidecar/internal/evaluate"
 	"github.com/sausheong/sidecar/internal/loop"
 	"github.com/stretchr/testify/assert"
 )
+
+func TestResolveModels_EvaluatorDefaultsToCoding(t *testing.T) {
+	cfg := &config.Config{}
+	m := loop.ResolveModels(cfg)
+	assert.Equal(t, m.Coding, m.Evaluator)
+}
+
+func TestResolveModels_EvaluatorOverride(t *testing.T) {
+	cfg := &config.Config{Models: config.ModelConfig{Evaluator: "anthropic/claude-opus-4-8"}}
+	m := loop.ResolveModels(cfg)
+	assert.Equal(t, "anthropic/claude-opus-4-8", m.Evaluator)
+}
+
+func TestShipsCode(t *testing.T) {
+	assert.True(t, loop.ShipsCode("auto-commit"))
+	assert.True(t, loop.ShipsCode("pull-request"))
+	assert.False(t, loop.ShipsCode("suggest-only"))
+	assert.False(t, loop.ShipsCode("notify"))
+}
+
+func TestGateAllowsCommit(t *testing.T) {
+	assert.True(t, loop.GateAllowsCommit(evaluate.Verdict{Pass: true}, nil))
+	assert.False(t, loop.GateAllowsCommit(evaluate.Verdict{Pass: false}, nil))
+	// Fail closed: evaluator error blocks the commit even on a pass verdict.
+	assert.False(t, loop.GateAllowsCommit(evaluate.Verdict{Pass: true}, errors.New("boom")))
+}
 
 func TestBuildSystemPrompt_GitCommit(t *testing.T) {
 	sig := adapter.Signal{
