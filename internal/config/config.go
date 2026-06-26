@@ -17,6 +17,8 @@ type Config struct {
 	Embedding     EmbeddingConfig      `yaml:"embedding"`
 	Notifications []NotificationConfig `yaml:"notifications"`
 	Verification  VerificationConfig   `yaml:"verification"`
+	Skills        SkillsConfig         `yaml:"skills"`
+	Budget        BudgetConfig         `yaml:"budget"`
 }
 
 // VerificationConfig controls the adversarial evaluator gate.
@@ -33,6 +35,32 @@ func (c *Config) VerificationEnabled() bool {
 		return true
 	}
 	return *c.Verification.Enabled
+}
+
+// SkillsConfig points the loop at a directory of SKILL.md files in the target repo.
+type SkillsConfig struct {
+	Dir string `yaml:"dir"`
+}
+
+// SkillsDir returns the configured skills directory (relative to the repo root),
+// defaulting to ".sidecar/skills".
+func (c *Config) SkillsDir() string {
+	if c.Skills.Dir == "" {
+		return ".sidecar/skills"
+	}
+	return c.Skills.Dir
+}
+
+// BudgetConfig caps autonomous spend.
+type BudgetConfig struct {
+	// DailyTokens is the per-workspace per-UTC-day token ceiling
+	// (input+output). 0 means unlimited.
+	DailyTokens int `yaml:"daily_tokens"`
+}
+
+// DailyTokenBudget returns the daily token ceiling; 0 means unlimited.
+func (c *Config) DailyTokenBudget() int {
+	return c.Budget.DailyTokens
 }
 
 type NotificationConfig struct {
