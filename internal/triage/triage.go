@@ -29,7 +29,7 @@ Analyze the incoming signal and decide:
 1. Whether it warrants autonomous action (should_act: true/false)
 2. If so, what type of change is needed
 
-Valid change_type values: "test_fix", "bug_fix", "dependency_update", "refactor", "log_fix", "metric_fix", "unknown"
+Valid change_type values: "test_fix", "bug_fix", "dependency_update", "refactor", "log_fix", "metric_fix", "uptime_fix", "unknown"
 
 Do NOT act (should_act: false) for:
 - CI failures caused by infrastructure issues (network timeouts, disk full, runner unavailable)
@@ -38,6 +38,10 @@ Do NOT act (should_act: false) for:
 
 Respond with ONLY valid JSON, no prose:
 {"should_act": true, "change_type": "test_fix", "reason": "one sentence"}`
+
+// SystemPrompt returns the triage system prompt. Exposed for tests that
+// assert on its content.
+func SystemPrompt() string { return triageSystemPrompt }
 
 // Triage calls the triage model to classify a signal.
 // On any failure it returns a conservative default (suggest-only) rather than dropping the signal.
