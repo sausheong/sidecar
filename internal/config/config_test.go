@@ -135,3 +135,20 @@ func TestLoad_Embedding_Empty(t *testing.T) {
 
 	assert.Equal(t, "", cfg.Embedding.Provider)
 }
+
+func TestVerificationEnabled_DefaultsTrueWhenAbsent(t *testing.T) {
+	cfg := &config.Config{}
+	assert.True(t, cfg.VerificationEnabled())
+}
+
+func TestVerificationEnabled_RespectsExplicitFalse(t *testing.T) {
+	f := false
+	cfg := &config.Config{Verification: config.VerificationConfig{Enabled: &f}}
+	assert.False(t, cfg.VerificationEnabled())
+}
+
+func TestVerificationEnabled_RespectsExplicitTrue(t *testing.T) {
+	tr := true
+	cfg := &config.Config{Verification: config.VerificationConfig{Enabled: &tr}}
+	assert.True(t, cfg.VerificationEnabled())
+}

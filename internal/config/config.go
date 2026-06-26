@@ -16,6 +16,23 @@ type Config struct {
 	Scope         ScopeConfig          `yaml:"scope"`
 	Embedding     EmbeddingConfig      `yaml:"embedding"`
 	Notifications []NotificationConfig `yaml:"notifications"`
+	Verification  VerificationConfig   `yaml:"verification"`
+}
+
+// VerificationConfig controls the adversarial evaluator gate.
+type VerificationConfig struct {
+	// Enabled gates auto-commit and pull-request changes behind the
+	// evaluator. Pointer so an absent value defaults to true.
+	Enabled *bool `yaml:"enabled"`
+}
+
+// VerificationEnabled reports whether the evaluator gate is on. Defaults to
+// true when unset — a default-off gate would not close the Nodding Loop.
+func (c *Config) VerificationEnabled() bool {
+	if c.Verification.Enabled == nil {
+		return true
+	}
+	return *c.Verification.Enabled
 }
 
 type NotificationConfig struct {
@@ -149,9 +166,10 @@ type AutonomyPolicy struct {
 }
 
 type ModelConfig struct {
-	Planning string `yaml:"planning"`
-	Coding   string `yaml:"coding"`
-	Triage   string `yaml:"triage"`
+	Planning  string `yaml:"planning"`
+	Coding    string `yaml:"coding"`
+	Triage    string `yaml:"triage"`
+	Evaluator string `yaml:"evaluator"`
 }
 
 type ScopeConfig struct {
