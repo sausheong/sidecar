@@ -37,6 +37,9 @@ func TestCreate_IsolatedDirAndBranch(t *testing.T) {
 	assert.Equal(t, "sidecar/task-123", wt.Branch)
 	assert.NotEqual(t, repo, wt.Path)
 
+	// Base is captured as the 40-hex SHA the worktree was created from.
+	assert.Regexp(t, "^[0-9a-f]{40}$", wt.Base)
+
 	// The worktree dir exists and is a working tree.
 	info, err := os.Stat(wt.Path)
 	require.NoError(t, err)

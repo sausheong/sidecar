@@ -73,14 +73,23 @@ func ParseVerdict(raw string) (Verdict, error) {
 	return Verdict{Pass: resp.Pass, Reasons: resp.Reasons}, nil
 }
 
-// Evaluate builds a fresh skeptic runtime over the uncommitted diff in workDir
-// and returns its verdict. It does NOT inherit the generator's conversation —
-// the evaluator must carry none of the generator's self-persuasion.
+// Evaluate builds a fresh skeptic runtime over the diff in workDir and returns
+// its verdict. It does NOT inherit the generator's conversation — the evaluator
+// must carry none of the generator's self-persuasion.
+//
+// The diff is taken against baseRef so it captures BOTH uncommitted changes and
+// any commits the generator agent made on top of base (the agent has bash and
+// can self-commit; diffing against HEAD would then yield an empty diff and
+// silently bypass this gate). If baseRef is "" it falls back to "HEAD" to
+// preserve the in-repo (non-worktree) behavior.
 //
 // On any setup/run error the caller should fail closed (treat as REJECT); this
 // function returns the error so the caller can record it.
-func Evaluate(ctx context.Context, provider llm.LLMProvider, model, workDir, taskSummary string) (Verdict, error) {
-	diffOut, err := exec.Command("git", "-C", workDir, "diff", "HEAD").CombinedOutput()
+func Evaluate(ctx context.Context, provider llm.LLMProvider, model, workDir, baseRef, taskSummary string) (Verdict, error) {
+	if baseRef == "" {
+		baseRef = "HEAD"
+	}
+	diffOut, err := exec.Command("git", "-C", workDir, "diff", baseRef).CombinedOutput()
 	if err != nil {
 		return Verdict{}, fmt.Errorf("git diff: %w\n%s", err, strings.TrimSpace(string(diffOut)))
 	}

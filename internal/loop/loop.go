@@ -283,7 +283,14 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 
 	// ── Adversarial evaluation gate ──────────────────────────────────────────
 	if ShipsCode(tr.AutonomyLevel) && l.cfg.VerificationEnabled() {
-		verdict, evalErr := evaluate.Evaluate(ctx, l.provider, models.Evaluator, workDir, task.Summary)
+		// Anchor the diff to the worktree base ref so the evaluator sees the
+		// agent's changes even if it self-committed (HEAD would have moved).
+		// In the in-repo fallback (wt == nil) baseRef is "" → Evaluate uses HEAD.
+		baseRef := ""
+		if wt != nil {
+			baseRef = wt.Base
+		}
+		verdict, evalErr := evaluate.Evaluate(ctx, l.provider, models.Evaluator, workDir, baseRef, task.Summary)
 		if evalErr != nil {
 			slog.Warn("evaluator error; failing closed (downgrade to suggestion)", "err", evalErr, "task", task.ID)
 		}
@@ -310,11 +317,14 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 	commit := func() (string, error) {
 		out := output.New(workDir)
 		if wt != nil {
-			did, err := out.CommitInPlace("sidecar: " + task.Summary)
+			// Detect changes relative to the worktree base ref so an agent
+			// self-commit still routes to PR/completed-with-branch rather than
+			// being misread as "no changes".
+			changed, err := out.CommitInPlaceFrom(wt.Base, "sidecar: "+task.Summary)
 			if err != nil {
 				return "", err
 			}
-			if !did {
+			if !changed {
 				return output.BranchNoChanges, nil
 			}
 			return wt.Branch, nil

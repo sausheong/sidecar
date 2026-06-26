@@ -14,6 +14,10 @@ import (
 type Worktree struct {
 	Path   string
 	Branch string
+	// Base is the commit SHA the worktree was created from. Callers anchor
+	// diffs and ahead-of-base checks to this ref so that an agent which
+	// self-commits is still detected (HEAD would move with the agent's commit).
+	Base string
 }
 
 // Create adds a git worktree at a fresh temp dir on branch sidecar/<taskID>,
@@ -36,7 +40,15 @@ func Create(repoPath, taskID string) (*Worktree, func() error, error) {
 		return nil, nil, fmt.Errorf("git worktree add: %w\n%s", err, strings.TrimSpace(string(out)))
 	}
 
-	wt := &Worktree{Path: dir, Branch: branch}
+	baseOut, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").CombinedOutput()
+	if err != nil {
+		// Roll back the worktree we just created so we don't leak it.
+		_, _ = exec.Command("git", "-C", repoPath, "worktree", "remove", "--force", dir).CombinedOutput()
+		return nil, nil, fmt.Errorf("git rev-parse HEAD: %w\n%s", err, strings.TrimSpace(string(baseOut)))
+	}
+	base := strings.TrimSpace(string(baseOut))
+
+	wt := &Worktree{Path: dir, Branch: branch, Base: base}
 	cleanup := func() error {
 		o, e := exec.Command("git", "-C", repoPath, "worktree", "remove", "--force", dir).CombinedOutput()
 		if e != nil {
