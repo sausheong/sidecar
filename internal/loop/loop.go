@@ -114,6 +114,7 @@ type Loop struct {
 	embedding  memory.EmbeddingProvider // nil when memory is not configured
 	memTool    *harnessmem.MemoryTool   // nil when embedding is nil
 	dispatcher *notify.Dispatcher       // nil when no notifications configured
+	skills     runtime.SkillProvider    // nil when no skills dir present
 }
 
 // New constructs a Loop. Pass nil for embedding to disable memory retrieval and reviewer-driven memory writes.
@@ -123,6 +124,7 @@ func New(db *store.DB, workspace *store.Workspace, cfg *config.Config, repoPath 
 		adapter := memory.NewHarnessStoreAdapter(db, embedding, workspace.ID)
 		memTool = &harnessmem.MemoryTool{Store: adapter}
 	}
+	skills := buildSkillsProvider(repoPath, cfg)
 	return &Loop{
 		db:         db,
 		workspace:  workspace,
@@ -132,6 +134,7 @@ func New(db *store.DB, workspace *store.Workspace, cfg *config.Config, repoPath 
 		embedding:  embedding,
 		memTool:    memTool,
 		dispatcher: notify.NewDispatcher(cfg.Notifications),
+		skills:     skills,
 	}
 }
 
@@ -149,6 +152,23 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 	}
 	if err := l.db.CreateTask(ctx, task); err != nil {
 		return fmt.Errorf("creating task: %w", err)
+	}
+
+	// ── Budget gate ──────────────────────────────────────────────────────────
+	// Checked before any LLM spend. Fails OPEN: a metering error allows the run
+	// (the cap is a cost guard, not a safety gate — unlike the evaluator).
+	if budget := l.cfg.DailyTokenBudget(); budget > 0 {
+		startOfDay := time.Now().UTC().Truncate(24 * time.Hour)
+		spent, bErr := l.db.SumWorkspaceTokensSince(ctx, l.workspace.ID, startOfDay)
+		if bErr != nil {
+			slog.Warn("budget check failed; allowing run (fail open)", "err", bErr, "task", task.ID)
+		} else if spent >= budget {
+			slog.Info("sidecar: daily token budget reached; skipping", "spent", spent, "budget", budget, "task", task.ID)
+			_ = l.db.AppendTaskEvent(ctx, task.ID, "budget_exceeded", map[string]any{"spent": spent, "budget": budget})
+			_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusSkipped)
+			l.dispatcher.Fire(ctx, notify.EventBudgetExceeded, sig, task)
+			return nil
+		}
 	}
 
 	// ── Triage ──────────────────────────────────────────────────────────────
@@ -263,7 +283,7 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 
 	var buildErr error
 	rt, buildErr = runtime.BuildRuntime(
-		runtime.RuntimeDeps{},
+		runtime.RuntimeDeps{Skills: l.skills},
 		runtime.RuntimeInputs{
 			Provider: l.provider,
 			Tools:    reg,
@@ -285,6 +305,7 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 
 	var agentErr error
 	var textBuf strings.Builder
+	var codingUsage UsageTotals
 	for ev := range events {
 		if ev.Type == runtime.EventError {
 			agentErr = ev.Error
@@ -292,6 +313,13 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		if ev.Type == runtime.EventTextDelta {
 			textBuf.WriteString(ev.Text)
 		}
+		AccumulateUsage(&codingUsage, ev)
+	}
+	if codingUsage.Total() > 0 {
+		_ = l.db.AppendTaskEvent(ctx, task.ID, "usage", map[string]any{
+			"input": codingUsage.Input, "output": codingUsage.Output,
+			"total": codingUsage.Total(), "model": models.Coding, "role": "coding",
+		})
 	}
 	if agentErr != nil {
 		_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusFailed)
