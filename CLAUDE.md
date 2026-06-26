@@ -65,6 +65,8 @@ internal/
 - **Triage uses haiku** (cheap/fast) — always-on monitoring stays affordable; coding uses sonnet
 - **Autonomy is per-change-type**: `auto-commit` / `pull-request` / `suggest-only` configured in `sidecar.yaml`
 - **Git adapter** records HEAD at startup — pre-existing commits never trigger signals
+- **Adversarial evaluator** — code-shipping changes (`auto-commit`/`pull-request`) are gated by a fresh skeptic runtime (`internal/evaluate`) that runs tests over the diff and can REJECT (downgrades to a suggestion). Default on via `verification.enabled`.
+- **Worktree isolation** — each code-shipping task runs in its own `git worktree` (`internal/worktree`), so concurrent signals never share a working tree.
 - **Loop status constants** are in `internal/loop`: `StatusPending`, `StatusRunning`, `StatusCompleted`, `StatusFailed`
 - **`store.ErrNotFound`** — defined in `internal/store/db.go`; used by `GetWorkspaceByPath` for missing workspaces
 
@@ -73,7 +75,7 @@ internal/
 | Phase | Status | Deliverables |
 |-------|--------|-------------|
 | **1 — Core Runtime** | ✅ Complete | CLI, git + schedule adapters, Harness loop, PostgreSQL store |
-| **2 — Reactive** | Pending | CI adapter (GitHub Actions), triage loop, PR creation |
+| **2 — Reactive** | ✅ Complete | CI adapter (GitHub Actions), triage loop, PR creation; adversarial evaluator gate (`internal/evaluate`) + worktree isolation (`internal/worktree`) via `verification.enabled` |
 | **3 — Memory** | ✅ Complete (harness v0.2.0) | pgvector storage; agent-driven writes via harness MemoryTool + HarnessStoreAdapter; runtime.Review fires on LifecycleHooks.OnStop |
 | **4 — Proactive** | Pending | Idle sweeps, `sidecar ask` |
 | **5 — Adapters** | Pending | Logs, metrics, additional CI providers |

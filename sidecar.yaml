@@ -19,11 +19,18 @@ autonomy:
   bug_fixes: pull-request
   refactoring: suggest-only
   schema_changes: suggest-only
+  log_fixes: suggest-only
+  metric_fixes: suggest-only
+  uptime_fixes: notify
+
+verification:
+  enabled: true        # adversarial evaluator gates auto-commit & pull-request (default true)
 
 models:
   planning: anthropic/claude-sonnet-4-6
   coding: anthropic/claude-sonnet-4-6
   triage: anthropic/claude-haiku-4-5
+  evaluator: anthropic/claude-sonnet-4-6   # optional; defaults to coding model
 
 scope:
   include: [src/, tests/]
