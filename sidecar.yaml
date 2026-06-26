@@ -35,3 +35,12 @@ models:
 scope:
   include: [src/, tests/]
   exclude: [secrets/]
+
+skills:
+  dir: .sidecar/skills   # SKILL.md files in the target repo; loaded into the coding agent
+
+budget:
+  # Coarse circuit breaker, not precise accounting. Harness AgentEvent reports
+  # token usage only for the FINAL turn of a multi-turn run, so this meter
+  # undercounts real spend on multi-turn coding runs — set conservatively.
+  daily_tokens: 0        # per-workspace per-UTC-day input+output token cap; 0 = unlimited
