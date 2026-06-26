@@ -24,6 +24,7 @@ import (
 	"github.com/sausheong/sidecar/internal/output"
 	"github.com/sausheong/sidecar/internal/store"
 	"github.com/sausheong/sidecar/internal/triage"
+	"github.com/sausheong/sidecar/internal/worktree"
 )
 
 // Task status constants.
@@ -74,6 +75,14 @@ func ShipsCode(autonomyLevel string) bool {
 // Fails closed: any evaluator error blocks the commit regardless of verdict.
 func GateAllowsCommit(verdict evaluate.Verdict, evalErr error) bool {
 	return evalErr == nil && verdict.Pass
+}
+
+// errString returns the error message, or "" if err is nil. Used for JSON event payloads.
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // Loop is the core improvement loop that wraps a Harness runtime invocation
@@ -171,12 +180,32 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		return err
 	}
 
+	// Code-shipping autonomy levels run in an isolated worktree so concurrent
+	// signals never share a working tree. suggest-only/notify run in-repo.
+	workDir := l.repoPath
+	var wtCleanup func() error
+	var wt *worktree.Worktree
+	if ShipsCode(tr.AutonomyLevel) {
+		w, cleanup, wErr := worktree.Create(l.repoPath, task.ID.String())
+		if wErr != nil {
+			slog.Warn("worktree create failed; falling back to in-repo execution", "err", wErr, "task", task.ID)
+			_ = l.db.AppendTaskEvent(ctx, task.ID, "worktree_degraded", map[string]any{"error": wErr.Error()})
+		} else {
+			wt, wtCleanup, workDir = w, cleanup, w.Path
+			defer func() {
+				if cErr := wtCleanup(); cErr != nil {
+					slog.Warn("worktree cleanup failed", "err", cErr, "task", task.ID)
+				}
+			}()
+		}
+	}
+
 	reg := tool.NewRegistry()
-	reg.Register(&file.ReadFileTool{WorkDir: l.repoPath})
+	reg.Register(&file.ReadFileTool{WorkDir: workDir})
 	if tr.AutonomyLevel != "suggest-only" {
-		reg.Register(&file.WriteFileTool{WorkDir: l.repoPath})
-		reg.Register(&file.EditFileTool{WorkDir: l.repoPath})
-		reg.Register(&bash.BashTool{WorkDir: l.repoPath})
+		reg.Register(&file.WriteFileTool{WorkDir: workDir})
+		reg.Register(&file.EditFileTool{WorkDir: workDir})
+		reg.Register(&bash.BashTool{WorkDir: workDir})
 	}
 	if l.memTool != nil {
 		reg.Register(l.memTool)
@@ -194,7 +223,7 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		ID:           task.ID.String(),
 		Name:         "Sidecar",
 		Model:        models.Coding,
-		Workspace:    l.repoPath,
+		Workspace:    workDir,
 		SystemPrompt: systemPrompt,
 		MaxTurns:     20,
 		Loop: runtime.LoopConfig{
@@ -252,6 +281,47 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		return fmt.Errorf("agent error: %w", agentErr)
 	}
 
+	// ── Adversarial evaluation gate ──────────────────────────────────────────
+	if ShipsCode(tr.AutonomyLevel) && l.cfg.VerificationEnabled() {
+		verdict, evalErr := evaluate.Evaluate(ctx, l.provider, models.Evaluator, workDir, task.Summary)
+		if evalErr != nil {
+			slog.Warn("evaluator error; failing closed (downgrade to suggestion)", "err", evalErr, "task", task.ID)
+		}
+		_ = l.db.AppendTaskEvent(ctx, task.ID, "evaluation", map[string]any{
+			"pass":    verdict.Pass,
+			"reasons": verdict.Reasons,
+			"model":   models.Evaluator,
+			"error":   errString(evalErr),
+		})
+		if !GateAllowsCommit(verdict, evalErr) {
+			slog.Info("evaluator rejected change; recording as suggestion", "task", task.ID, "reasons", verdict.Reasons)
+			_ = l.db.AppendTaskEvent(ctx, task.ID, "suggestion", map[string]any{
+				"summary":          textBuf.String(),
+				"rejected_reasons": verdict.Reasons,
+			})
+			_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusSuggested)
+			l.dispatcher.Fire(ctx, notify.EventSuggested, sig, task)
+			return nil
+		}
+	}
+
+	// commit creates the output branch. In a worktree it commits in place and
+	// returns the worktree's branch; in-repo it falls back to CommitBranch.
+	commit := func() (string, error) {
+		out := output.New(workDir)
+		if wt != nil {
+			did, err := out.CommitInPlace("sidecar: " + task.Summary)
+			if err != nil {
+				return "", err
+			}
+			if !did {
+				return output.BranchNoChanges, nil
+			}
+			return wt.Branch, nil
+		}
+		return out.CommitBranch(task.ID.String(), "sidecar: "+task.Summary)
+	}
+
 	// ── Output routing ───────────────────────────────────────────────────────
 	switch tr.AutonomyLevel {
 	case "suggest-only":
@@ -263,8 +333,7 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		return nil
 
 	case "pull-request":
-		out := output.New(l.repoPath)
-		branch, err := out.CommitBranch(task.ID.String(), "sidecar: "+task.Summary)
+		branch, err := commit()
 		if err != nil {
 			_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusFailed)
 			l.dispatcher.Fire(ctx, notify.EventFailed, sig, task)
@@ -292,8 +361,7 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		return nil
 
 	default: // "auto-commit"
-		out := output.New(l.repoPath)
-		branch, err := out.CommitBranch(task.ID.String(), "sidecar: "+task.Summary)
+		branch, err := commit()
 		if err != nil {
 			_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusFailed)
 			l.dispatcher.Fire(ctx, notify.EventFailed, sig, task)
