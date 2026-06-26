@@ -51,6 +51,26 @@ func TestCommitBranch_WithChanges(t *testing.T) {
 	assert.Contains(t, string(out), "sidecar: applied fix")
 }
 
+func TestCommitInPlace_CommitsOnCurrentBranch(t *testing.T) {
+	dir := initRepo(t)
+	o := output.New(dir)
+
+	// Clean tree → no commit.
+	did, err := o.CommitInPlace("sidecar: noop")
+	require.NoError(t, err)
+	assert.False(t, did)
+
+	// Dirty tree → commits on the current branch (no new branch created).
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "fix.txt"), []byte("patched"), 0644))
+	did, err = o.CommitInPlace("sidecar: applied fix")
+	require.NoError(t, err)
+	assert.True(t, did)
+
+	out, err := exec.Command("git", "-C", dir, "log", "--oneline", "-1").Output()
+	require.NoError(t, err)
+	assert.Contains(t, string(out), "sidecar: applied fix")
+}
+
 func TestCommitBranch_Idempotent(t *testing.T) {
 	dir := initRepo(t)
 	o := output.New(dir)

@@ -40,6 +40,27 @@ func (o *Output) CommitBranch(taskID, message string) (string, error) {
 	return branch, nil
 }
 
+// CommitInPlace stages and commits all changes on the CURRENT branch (used
+// when the caller is already inside an isolated worktree on its own branch).
+// Returns true if a commit was made, false if the working tree was clean.
+func (o *Output) CommitInPlace(message string) (bool, error) {
+	if clean, err := o.isClean(); err != nil {
+		return false, err
+	} else if clean {
+		return false, nil
+	}
+	cmds := [][]string{
+		{"git", "-C", o.repoPath, "add", "-A"},
+		{"git", "-C", o.repoPath, "commit", "-m", message},
+	}
+	for _, args := range cmds {
+		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+			return false, fmt.Errorf("git %s: %w\n%s", args[3], err, out)
+		}
+	}
+	return true, nil
+}
+
 func (o *Output) isClean() (bool, error) {
 	out, err := exec.Command("git", "-C", o.repoPath, "status", "--porcelain").Output()
 	if err != nil {
