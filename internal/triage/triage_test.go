@@ -154,13 +154,8 @@ func TestBuildTriageMessage_CIFailure_CircleCI(t *testing.T) {
 }
 
 func TestTriageSystemPrompt_EnumeratesAllChangeTypes(t *testing.T) {
-	msg := triage.BuildTriageMessage(adapter.Signal{
-		Type:    adapter.SignalUptimeFailure,
-		Payload: map[string]any{"url": "https://x", "failure_type": "wrong_status"},
-	})
-	// BuildTriageMessage is the user turn; the enum lives in the system prompt,
-	// exposed for testing via SystemPrompt().
-	_ = msg
+	// The change_type enum lives in the triage system prompt; if a type is
+	// not listed there, the LLM can never emit it (the uptime_fix bug).
 	sp := triage.SystemPrompt()
 	for _, ct := range []string{"test_fix", "bug_fix", "dependency_update", "refactor", "log_fix", "metric_fix", "uptime_fix"} {
 		assert.Contains(t, sp, ct, "change_type %q must be enumerated in the triage system prompt", ct)
