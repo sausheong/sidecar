@@ -575,6 +575,15 @@ sidecar task "add pagination to the /users endpoint"
 sidecar task "fix the flaky test in auth_test.go" --repo /path/to/project
 ```
 
+### `sidecar ask <question>`
+
+Ask a question about the codebase, answered from the workspace's vector memory (no code is changed). Requires an `embedding` section in `sidecar.yaml` and a prior `sidecar attach` so memory exists to query.
+
+```bash
+sidecar ask "how does the auth middleware work?"
+sidecar ask "what areas have been flagged as fragile?" --repo /path/to/project
+```
+
 ### `sidecar status`
 
 Show the 20 most recent tasks for the workspace.
@@ -597,7 +606,7 @@ When `embedding` is configured in `sidecar.yaml`, Sidecar maintains a persistent
 
 - **After every task:** a Haiku reflect step extracts architectural facts (semantic), workflow patterns (procedural), and a task summary (episodic) from what the agent did, storing them as 1024-dimensional embeddings in PostgreSQL via pgvector.
 - **Before every task:** the most relevant memory entries are retrieved by semantic similarity and injected into the agent's system prompt.
-- **Scheduled sweeps:** the idle sweep prioritises fragile areas and under-tested code paths from memory before falling back to generic checks.
+- **Scheduled sweeps:** a cron-triggered maintenance sweep prioritises fragile areas and under-tested code paths flagged in memory before falling back to generic checks.
 
 ### Supported Embedding Providers
 
