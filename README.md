@@ -1,6 +1,6 @@
 # Sidecar
 
-An autonomous engineering agent that attaches to any software project as a persistent sidecar process and continuously maintains it. Sidecar watches for signals (git commits, CI failures, scheduled sweeps, log anomalies, metric alerts), triages each one, and applies the appropriate fix — committing directly, opening a PR, or recording a suggestion — based on your configured autonomy level.
+An autonomous engineering agent that attaches to any software project as a persistent sidecar process and continuously maintains it. Sidecar watches for signals (git commits, CI failures, scheduled sweeps, log anomalies, metric alerts, uptime checks), triages each one, and applies the appropriate fix — committing directly, opening a PR, recording a suggestion, or notifying a human — based on your configured autonomy level. Before any change ships, an independent adversarial evaluator runs the tests over the diff and can veto it.
 
 ## How It Works
 
@@ -9,14 +9,22 @@ Signal source (git / CI / schedule / logs / metrics / uptime)
         ↓
     Triage (Haiku — should we act? what kind of change?)
         ↓
+  Budget gate (skip if the daily token cap is already spent)
+        ↓
   Memory retrieval (pgvector — what do we know about this codebase?)
         ↓
-   Coding agent (Claude — read, edit, bash, run tests)
+   Worktree (isolated git worktree for this task)
         ↓
-  Output routing (auto-commit / pull-request / suggest-only)
+   Coding agent (Claude — read, edit, bash, run tests; skills loaded)
+        ↓
+  Evaluator (fresh skeptic — runs tests on the diff, PASS or REJECT)
+        ↓
+  Output routing (auto-commit / pull-request / suggest-only / notify)
         ↓
    Reflect (Haiku — extract learnings, update memory)
 ```
+
+For infrastructure-class failures (e.g. an uptime check where DNS or TCP is down) the loop short-circuits at triage to a notification — no coding agent runs. The `notify` autonomy level fires Slack / webhook / email instead of touching code.
 
 ### 1. Signal adapters
 
@@ -70,21 +78,32 @@ The system prompt is signal-specific (different instructions for a git commit vs
 - Retrieved memory context
 - An instruction to start exploration with `find <workspace> -name "*.go" | head -40` (or equivalent) rather than guessing filenames
 
-The agent runs up to 40 turns. Typical task flow: discover the repo layout → read relevant files → run the test suite → identify the failure → apply a targeted fix → run tests again to confirm.
+The agent runs up to 20 turns inside an **isolated git worktree** dedicated to this task, so concurrent signals never share a working tree. If a `.sidecar/skills/` directory exists in the target repo, its `SKILL.md` files are loaded as **skills** — persistent project knowledge the agent can pull in on demand instead of re-deriving it every run. Typical task flow: discover the repo layout → read relevant files → run the test suite → identify the failure → apply a targeted fix → run tests again to confirm.
 
-### 5. Output routing
+### 5. Evaluator gate
 
-After the agent finishes, the output is routed based on the autonomy level resolved for that change type:
+Before any code ships (`auto-commit` or `pull-request`), an **adversarial evaluator** reviews the diff. It is a fresh agent session — different context from the coding agent, instructed to assume the change is broken until proven otherwise — with read and bash tools only. It runs the build and tests against the diff (anchored to the worktree's base ref, so it sees the change even if the coding agent committed it itself) and returns a verdict:
+
+```json
+{"pass": false, "reasons": "tests still fail: TestCreate expects 201, got 200"}
+```
+
+On **REJECT**, the change does not ship — it is recorded as a suggestion with the evaluator's reasons. The gate **fails closed**: if the evaluator errors or returns unparseable output, the change is treated as rejected, never silently committed. The evaluator is enabled by default (`verification.enabled: true`) and applies to both `auto-commit` and `pull-request`. `suggest-only` and `notify` skip it.
+
+### 6. Output routing
+
+After the evaluator passes, the output is routed based on the autonomy level resolved for that change type:
 
 | Autonomy level | What happens |
 |---------------|--------------|
-| `suggest-only` | Agent output is stored as a suggestion in the database. No files are written. |
-| `pull-request` | Modified files are committed to a new branch (`sidecar/<task-id>`), a PR is opened against the default branch, and the PR URL is recorded. |
-| `auto-commit` | Changes are committed directly to the current branch on a sidecar branch and the branch name is recorded. |
+| `suggest-only` | Agent output is stored as a suggestion in the database. No files are written. No evaluator runs. |
+| `pull-request` | Evaluator-approved changes are committed to a new branch (`sidecar/<task-id>`), a PR is opened against the default branch, and the PR URL is recorded. |
+| `auto-commit` | Evaluator-approved changes are committed on a `sidecar/<task-id>` branch and the branch name is recorded. |
+| `notify` | No coding agent runs; a Slack / webhook / email notification fires. Use this for infrastructure-class signals where no code change will help. |
 
-In all cases the task, its events, and the final status are written to PostgreSQL so `sidecar status` always shows a full audit trail.
+In all cases the task, its events (triage, evaluation verdict, token usage, output), and the final status are written to PostgreSQL so `sidecar status` always shows a full audit trail.
 
-### 6. Reflect
+### 7. Reflect
 
 When memory is enabled and the agent completes successfully, a short Haiku reviewer session runs asynchronously. It reads the task events and the agent's output and calls the `memory` tool to persist up to three entries — one per memory category — as vector embeddings. This step is fire-and-forget; it does not block the main loop.
 
@@ -476,7 +495,8 @@ signals:
           expect_status: 200
           expect_max_ms: 500    # fire if response takes >500ms
 
-# How much autonomy Sidecar has per change type
+# How much autonomy Sidecar has per change type.
+# Levels: auto-commit | pull-request | suggest-only | notify
 autonomy:
   dependency_updates: auto-commit
   test_fixes: auto-commit
@@ -485,26 +505,50 @@ autonomy:
   schema_changes: suggest-only
   log_fixes: suggest-only
   metric_fixes: suggest-only
-  uptime_fixes: suggest-only
+  uptime_fixes: notify          # infra-class — alert a human, don't touch code
+
+# Adversarial evaluator gate (defaults shown). Runs the tests over the diff
+# before any auto-commit / pull-request and can REJECT (→ recorded as a
+# suggestion). Fails closed. Default on.
+verification:
+  enabled: true
+
+# Daily token budget. Sums provider-reported usage (input+output+cache)
+# across triage + coding + evaluator, per workspace per UTC day; checked
+# before triage. 0 = unlimited. Fails open on a metering error.
+budget:
+  daily_tokens: 0
+
+# Skills: SKILL.md files in the target repo, loaded into the coding agent.
+skills:
+  dir: .sidecar/skills
 
 # Model overrides (defaults shown)
 models:
   coding: "anthropic/claude-sonnet-4-6"
   triage: "anthropic/claude-haiku-4-5-20251001"
+  evaluator: ""           # optional; defaults to the coding model
 
 # Embedding for persistent memory (optional but recommended)
 embedding:
   provider: openai        # "openai" | "voyage"
   model: text-embedding-3-small
+
+# Notifications — fired on task events (and for the `notify` autonomy level)
+notifications:
+  - provider: slack       # "slack" | "webhook" | "email"
+    webhook: $SLACK_WEBHOOK_URL
+    on: [completed, failed, notified]
 ```
 
 ### Autonomy Levels
 
 | Level | Behaviour |
 |-------|-----------|
-| `auto-commit` | Agent commits changes directly to the current branch |
-| `pull-request` | Agent commits to a new branch and opens a PR |
-| `suggest-only` | Agent writes up what it would do; no code is changed |
+| `auto-commit` | Evaluator-approved changes are committed on a `sidecar/<task-id>` branch |
+| `pull-request` | Evaluator-approved changes are committed to a new branch and a PR is opened |
+| `suggest-only` | Agent writes up what it would do; no code is changed, no evaluator runs |
+| `notify` | No agent runs; a Slack / webhook / email notification fires (for infra-class signals) |
 
 ## Commands
 
@@ -645,6 +689,9 @@ See `examples/pyapp/README.md` for the full guide.
 - Built on [harness](https://github.com/sausheong/harness) — a Go library for building LLM agents
 - All state is in PostgreSQL; the daemon is stateless and restartable
 - The `sidecar.yaml` in the target repo is the only coupling between the software and its agent — no code changes required in the managed project
-- Each signal triggers an independent task; tasks do not interfere with each other
-- The coding agent has access to `read_file`, `write_file`, `edit_file`, and `bash` tools; write tools are gated by autonomy level
+- Each signal triggers an independent task that runs in its own isolated git worktree, so concurrent tasks never share a working tree
+- Code-shipping changes pass an independent adversarial evaluator before they land; the gate fails closed (an unverifiable change is never committed)
+- The coding agent has access to `read_file`, `write_file`, `edit_file`, and `bash` tools; write tools are gated by autonomy level. The evaluator gets only `read_file` and `bash` — it judges, it never edits
+- A per-workspace daily token budget caps autonomous spend; usage is metered across triage, coding, and the evaluator
+- Two-tier model split: a cheap triage model classifies every signal so always-on monitoring stays affordable; a stronger model does the coding
 - Language-agnostic: Sidecar operates at the file, git, and shell level — any language works
