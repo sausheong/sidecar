@@ -20,6 +20,8 @@ const (
 	EventCompleted Event = "completed" // fix committed or PR opened
 	EventFailed    Event = "failed"    // agent or loop error
 	EventNotified  Event = "notified"  // notify autonomy level — no agent run
+
+	EventBudgetExceeded Event = "budget_exceeded" // daily token budget reached; run skipped
 )
 
 // Notifier sends a notification for a task event.

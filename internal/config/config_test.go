@@ -135,3 +135,40 @@ func TestLoad_Embedding_Empty(t *testing.T) {
 
 	assert.Equal(t, "", cfg.Embedding.Provider)
 }
+
+func TestVerificationEnabled_DefaultsTrueWhenAbsent(t *testing.T) {
+	cfg := &config.Config{}
+	assert.True(t, cfg.VerificationEnabled())
+}
+
+func TestVerificationEnabled_RespectsExplicitFalse(t *testing.T) {
+	f := false
+	cfg := &config.Config{Verification: config.VerificationConfig{Enabled: &f}}
+	assert.False(t, cfg.VerificationEnabled())
+}
+
+func TestVerificationEnabled_RespectsExplicitTrue(t *testing.T) {
+	tr := true
+	cfg := &config.Config{Verification: config.VerificationConfig{Enabled: &tr}}
+	assert.True(t, cfg.VerificationEnabled())
+}
+
+func TestSkillsDir_DefaultWhenEmpty(t *testing.T) {
+	cfg := &config.Config{}
+	assert.Equal(t, ".sidecar/skills", cfg.SkillsDir())
+}
+
+func TestSkillsDir_RespectsConfigured(t *testing.T) {
+	cfg := &config.Config{Skills: config.SkillsConfig{Dir: "ops/skills"}}
+	assert.Equal(t, "ops/skills", cfg.SkillsDir())
+}
+
+func TestDailyTokenBudget_DefaultsZero(t *testing.T) {
+	cfg := &config.Config{}
+	assert.Equal(t, 0, cfg.DailyTokenBudget())
+}
+
+func TestDailyTokenBudget_RespectsConfigured(t *testing.T) {
+	cfg := &config.Config{Budget: config.BudgetConfig{DailyTokens: 500000}}
+	assert.Equal(t, 500000, cfg.DailyTokenBudget())
+}

@@ -16,6 +16,51 @@ type Config struct {
 	Scope         ScopeConfig          `yaml:"scope"`
 	Embedding     EmbeddingConfig      `yaml:"embedding"`
 	Notifications []NotificationConfig `yaml:"notifications"`
+	Verification  VerificationConfig   `yaml:"verification"`
+	Skills        SkillsConfig         `yaml:"skills"`
+	Budget        BudgetConfig         `yaml:"budget"`
+}
+
+// VerificationConfig controls the adversarial evaluator gate.
+type VerificationConfig struct {
+	// Enabled gates auto-commit and pull-request changes behind the
+	// evaluator. Pointer so an absent value defaults to true.
+	Enabled *bool `yaml:"enabled"`
+}
+
+// VerificationEnabled reports whether the evaluator gate is on. Defaults to
+// true when unset — a default-off gate would not close the Nodding Loop.
+func (c *Config) VerificationEnabled() bool {
+	if c.Verification.Enabled == nil {
+		return true
+	}
+	return *c.Verification.Enabled
+}
+
+// SkillsConfig points the loop at a directory of SKILL.md files in the target repo.
+type SkillsConfig struct {
+	Dir string `yaml:"dir"`
+}
+
+// SkillsDir returns the configured skills directory (relative to the repo root),
+// defaulting to ".sidecar/skills".
+func (c *Config) SkillsDir() string {
+	if c.Skills.Dir == "" {
+		return ".sidecar/skills"
+	}
+	return c.Skills.Dir
+}
+
+// BudgetConfig caps autonomous spend.
+type BudgetConfig struct {
+	// DailyTokens is the per-workspace per-UTC-day token ceiling
+	// (input+output). 0 means unlimited.
+	DailyTokens int `yaml:"daily_tokens"`
+}
+
+// DailyTokenBudget returns the daily token ceiling; 0 means unlimited.
+func (c *Config) DailyTokenBudget() int {
+	return c.Budget.DailyTokens
 }
 
 type NotificationConfig struct {
@@ -149,9 +194,10 @@ type AutonomyPolicy struct {
 }
 
 type ModelConfig struct {
-	Planning string `yaml:"planning"`
-	Coding   string `yaml:"coding"`
-	Triage   string `yaml:"triage"`
+	Planning  string `yaml:"planning"`
+	Coding    string `yaml:"coding"`
+	Triage    string `yaml:"triage"`
+	Evaluator string `yaml:"evaluator"`
 }
 
 type ScopeConfig struct {

@@ -29,7 +29,7 @@ Analyze the incoming signal and decide:
 1. Whether it warrants autonomous action (should_act: true/false)
 2. If so, what type of change is needed
 
-Valid change_type values: "test_fix", "bug_fix", "dependency_update", "refactor", "log_fix", "metric_fix", "unknown"
+Valid change_type values: "test_fix", "bug_fix", "dependency_update", "refactor", "log_fix", "metric_fix", "uptime_fix", "unknown"
 
 Do NOT act (should_act: false) for:
 - CI failures caused by infrastructure issues (network timeouts, disk full, runner unavailable)
@@ -39,9 +39,15 @@ Do NOT act (should_act: false) for:
 Respond with ONLY valid JSON, no prose:
 {"should_act": true, "change_type": "test_fix", "reason": "one sentence"}`
 
+// SystemPrompt returns the triage system prompt. Exposed for tests that
+// assert on its content.
+func SystemPrompt() string { return triageSystemPrompt }
+
 // Triage calls the triage model to classify a signal.
 // On any failure it returns a conservative default (suggest-only) rather than dropping the signal.
-func Triage(ctx context.Context, provider llm.LLMProvider, model string, sig adapter.Signal, cfg *config.Config) (TriageResult, error) {
+// It also returns the token usage consumed by the triage runtime so the caller
+// can meter it toward the daily budget; usage is zero on all early-return paths.
+func Triage(ctx context.Context, provider llm.LLMProvider, model string, sig adapter.Signal, cfg *config.Config) (TriageResult, llm.Usage, error) {
 	rt, err := runtime.BuildRuntime(
 		runtime.RuntimeDeps{},
 		runtime.RuntimeInputs{
@@ -59,31 +65,36 @@ func Triage(ctx context.Context, provider llm.LLMProvider, model string, sig ada
 	)
 	if err != nil {
 		slog.Warn("triage runtime build failed, defaulting to suggest-only", "err", err)
-		return conservativeDefault(), nil
+		return conservativeDefault(), llm.Usage{}, nil
 	}
 	defer rt.Close()
 
 	events, err := rt.Run(ctx, BuildTriageMessage(sig), nil)
 	if err != nil {
 		slog.Warn("triage run failed, defaulting to suggest-only", "err", err)
-		return conservativeDefault(), nil
+		return conservativeDefault(), llm.Usage{}, nil
 	}
 
 	var sb strings.Builder
+	var usage llm.Usage
 	for ev := range events {
 		if ev.Type == runtime.EventTextDelta {
 			sb.WriteString(ev.Text)
+		}
+		if ev.Type == runtime.EventDone && ev.Usage != nil {
+			usage.InputTokens += ev.Usage.InputTokens
+			usage.OutputTokens += ev.Usage.OutputTokens
 		}
 	}
 
 	result, err := ParseTriageResponse(sb.String())
 	if err != nil {
 		slog.Warn("triage response parse failed, defaulting to suggest-only", "err", err, "raw", sb.String())
-		return conservativeDefault(), nil
+		return conservativeDefault(), llm.Usage{}, nil
 	}
 
 	result.AutonomyLevel = ResolveAutonomy(result.ChangeType, cfg)
-	return result, nil
+	return result, usage, nil
 }
 
 // BuildTriageMessage constructs the user-turn message sent to the triage agent.
@@ -146,15 +157,12 @@ func BuildTriageMessage(sig adapter.Signal) string {
 // ParseTriageResponse unmarshals the triage agent's JSON response.
 func ParseTriageResponse(raw string) (TriageResult, error) {
 	raw = strings.TrimSpace(raw)
-	// Strip markdown code fences the LLM sometimes wraps around JSON.
-	if strings.HasPrefix(raw, "```") {
-		if idx := strings.Index(raw, "\n"); idx != -1 {
-			raw = raw[idx+1:]
+	// Extract the first complete JSON object, tolerating code fences and
+	// duplicate responses caused by stream retries.
+	if start := strings.Index(raw, "{"); start != -1 {
+		if end := strings.LastIndex(raw, "}"); end != -1 && end >= start {
+			raw = raw[start : end+1]
 		}
-		if idx := strings.LastIndex(raw, "```"); idx != -1 {
-			raw = raw[:idx]
-		}
-		raw = strings.TrimSpace(raw)
 	}
 	var resp struct {
 		ShouldAct  bool   `json:"should_act"`

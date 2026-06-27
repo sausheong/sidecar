@@ -85,3 +85,21 @@ func (db *DB) AppendTaskEvent(ctx context.Context, taskID uuid.UUID, eventType s
 	}
 	return nil
 }
+
+// SumWorkspaceTokensSince returns the total tokens recorded in "usage"
+// task_events for the workspace since the given time. Used by the daily
+// budget cap. Returns 0 when there are no matching events.
+func (db *DB) SumWorkspaceTokensSince(ctx context.Context, workspaceID uuid.UUID, since time.Time) (int, error) {
+	const q = `
+		SELECT COALESCE(SUM((te.payload->>'total')::bigint), 0)
+		FROM task_events te
+		JOIN tasks t ON t.id = te.task_id
+		WHERE t.workspace_id = $1
+		  AND te.type = 'usage'
+		  AND te.created_at >= $2`
+	var sum int64
+	if err := db.pool.QueryRow(ctx, q, workspaceID, since).Scan(&sum); err != nil {
+		return 0, fmt.Errorf("summing workspace tokens: %w", err)
+	}
+	return int(sum), nil
+}

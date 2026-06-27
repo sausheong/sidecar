@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/sausheong/sidecar/internal/store"
@@ -313,4 +314,33 @@ func TestListMemory_AllAndByCategory(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, procedural, 1)
 	assert.Equal(t, "review", procedural[0].Origin)
+}
+
+func TestSumWorkspaceTokensSince(t *testing.T) {
+	db, err := store.Connect(context.Background(), dbURL(t))
+	require.NoError(t, err)
+	defer db.Close()
+	require.NoError(t, store.Migrate(context.Background(), db))
+
+	ctx := context.Background()
+
+	ws := &store.Workspace{Name: "sumtok", Path: t.TempDir(), ConfigHash: "h"}
+	require.NoError(t, db.UpsertWorkspace(ctx, ws))
+
+	task := &store.Task{WorkspaceID: ws.ID, SignalType: "git.commit", Summary: "x"}
+	require.NoError(t, db.CreateTask(ctx, task))
+
+	require.NoError(t, db.AppendTaskEvent(ctx, task.ID, "usage", map[string]any{"total": 1000}))
+	require.NoError(t, db.AppendTaskEvent(ctx, task.ID, "usage", map[string]any{"total": 500}))
+	// Non-usage events must be ignored.
+	require.NoError(t, db.AppendTaskEvent(ctx, task.ID, "triage", map[string]any{"total": 9999}))
+
+	sum, err := db.SumWorkspaceTokensSince(ctx, ws.ID, time.Now().Add(-time.Hour))
+	require.NoError(t, err)
+	assert.Equal(t, 1500, sum)
+
+	// A future "since" excludes everything.
+	sum, err = db.SumWorkspaceTokensSince(ctx, ws.ID, time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	assert.Equal(t, 0, sum)
 }

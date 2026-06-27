@@ -152,3 +152,12 @@ func TestBuildTriageMessage_CIFailure_CircleCI(t *testing.T) {
 	assert.Contains(t, msg, "build-and-test")
 	assert.Contains(t, msg, "failed")
 }
+
+func TestTriageSystemPrompt_EnumeratesAllChangeTypes(t *testing.T) {
+	// The change_type enum lives in the triage system prompt; if a type is
+	// not listed there, the LLM can never emit it (the uptime_fix bug).
+	sp := triage.SystemPrompt()
+	for _, ct := range []string{"test_fix", "bug_fix", "dependency_update", "refactor", "log_fix", "metric_fix", "uptime_fix"} {
+		assert.Contains(t, sp, ct, "change_type %q must be enumerated in the triage system prompt", ct)
+	}
+}

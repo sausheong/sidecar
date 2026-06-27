@@ -1,13 +1,56 @@
 package loop_test
 
 import (
+	"errors"
 	"testing"
 
+	"github.com/sausheong/harness/llm"
+	"github.com/sausheong/harness/runtime"
 	"github.com/sausheong/sidecar/internal/adapter"
 	"github.com/sausheong/sidecar/internal/config"
+	"github.com/sausheong/sidecar/internal/evaluate"
 	"github.com/sausheong/sidecar/internal/loop"
 	"github.com/stretchr/testify/assert"
 )
+
+func TestAccumulateUsage(t *testing.T) {
+	var u loop.UsageTotals
+	loop.AccumulateUsage(&u, runtime.AgentEvent{Type: runtime.EventDone, Usage: &llm.Usage{InputTokens: 100, OutputTokens: 40}})
+	loop.AccumulateUsage(&u, runtime.AgentEvent{Type: runtime.EventDone, Usage: &llm.Usage{InputTokens: 10, OutputTokens: 5}})
+	// Non-done / nil usage events are ignored.
+	loop.AccumulateUsage(&u, runtime.AgentEvent{Type: runtime.EventTextDelta})
+	loop.AccumulateUsage(&u, runtime.AgentEvent{Type: runtime.EventDone, Usage: nil})
+
+	assert.Equal(t, 110, u.Input)
+	assert.Equal(t, 45, u.Output)
+	assert.Equal(t, 155, u.Total())
+}
+
+func TestResolveModels_EvaluatorDefaultsToCoding(t *testing.T) {
+	cfg := &config.Config{}
+	m := loop.ResolveModels(cfg)
+	assert.Equal(t, m.Coding, m.Evaluator)
+}
+
+func TestResolveModels_EvaluatorOverride(t *testing.T) {
+	cfg := &config.Config{Models: config.ModelConfig{Evaluator: "anthropic/claude-opus-4-8"}}
+	m := loop.ResolveModels(cfg)
+	assert.Equal(t, "anthropic/claude-opus-4-8", m.Evaluator)
+}
+
+func TestShipsCode(t *testing.T) {
+	assert.True(t, loop.ShipsCode("auto-commit"))
+	assert.True(t, loop.ShipsCode("pull-request"))
+	assert.False(t, loop.ShipsCode("suggest-only"))
+	assert.False(t, loop.ShipsCode("notify"))
+}
+
+func TestGateAllowsCommit(t *testing.T) {
+	assert.True(t, loop.GateAllowsCommit(evaluate.Verdict{Pass: true}, nil))
+	assert.False(t, loop.GateAllowsCommit(evaluate.Verdict{Pass: false}, nil))
+	// Fail closed: evaluator error blocks the commit even on a pass verdict.
+	assert.False(t, loop.GateAllowsCommit(evaluate.Verdict{Pass: true}, errors.New("boom")))
+}
 
 func TestBuildSystemPrompt_GitCommit(t *testing.T) {
 	sig := adapter.Signal{

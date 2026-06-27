@@ -19,12 +19,28 @@ autonomy:
   bug_fixes: pull-request
   refactoring: suggest-only
   schema_changes: suggest-only
+  log_fixes: suggest-only
+  metric_fixes: suggest-only
+  uptime_fixes: notify
+
+verification:
+  enabled: true        # adversarial evaluator gates auto-commit & pull-request (default true)
 
 models:
   planning: anthropic/claude-sonnet-4-6
   coding: anthropic/claude-sonnet-4-6
   triage: anthropic/claude-haiku-4-5
+  evaluator: anthropic/claude-sonnet-4-6   # optional; defaults to coding model
 
 scope:
   include: [src/, tests/]
   exclude: [secrets/]
+
+skills:
+  dir: .sidecar/skills   # SKILL.md files in the target repo; loaded into the coding agent
+
+budget:
+  # Coarse circuit breaker, not precise accounting. Harness AgentEvent reports
+  # token usage only for the FINAL turn of a multi-turn run, so this meter
+  # undercounts real spend on multi-turn coding runs — set conservatively.
+  daily_tokens: 0        # per-workspace per-UTC-day input+output token cap; 0 = unlimited

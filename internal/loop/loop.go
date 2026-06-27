@@ -18,11 +18,13 @@ import (
 	"github.com/sausheong/harness/tools/file"
 	"github.com/sausheong/sidecar/internal/adapter"
 	"github.com/sausheong/sidecar/internal/config"
+	"github.com/sausheong/sidecar/internal/evaluate"
 	"github.com/sausheong/sidecar/internal/memory"
 	"github.com/sausheong/sidecar/internal/notify"
 	"github.com/sausheong/sidecar/internal/output"
 	"github.com/sausheong/sidecar/internal/store"
 	"github.com/sausheong/sidecar/internal/triage"
+	"github.com/sausheong/sidecar/internal/worktree"
 )
 
 // Task status constants.
@@ -38,8 +40,9 @@ const (
 
 // Models holds the resolved model names for each agent role.
 type Models struct {
-	Coding string
-	Triage string
+	Coding    string
+	Triage    string
+	Evaluator string
 }
 
 // ResolveModels returns the effective model names from cfg, falling back to
@@ -55,7 +58,49 @@ func ResolveModels(cfg *config.Config) Models {
 	if cfg.Models.Triage != "" {
 		m.Triage = cfg.Models.Triage
 	}
+	m.Evaluator = m.Coding
+	if cfg.Models.Evaluator != "" {
+		m.Evaluator = cfg.Models.Evaluator
+	}
 	return m
+}
+
+// ShipsCode reports whether an autonomy level results in committed code and
+// therefore must pass the evaluator gate.
+func ShipsCode(autonomyLevel string) bool {
+	return autonomyLevel == "auto-commit" || autonomyLevel == "pull-request"
+}
+
+// GateAllowsCommit reports whether the evaluator verdict permits committing.
+// Fails closed: any evaluator error blocks the commit regardless of verdict.
+func GateAllowsCommit(verdict evaluate.Verdict, evalErr error) bool {
+	return evalErr == nil && verdict.Pass
+}
+
+// UsageTotals accumulates token usage across an agent run's events.
+type UsageTotals struct {
+	Input  int
+	Output int
+}
+
+// Total returns the combined input+output tokens.
+func (u UsageTotals) Total() int { return u.Input + u.Output }
+
+// AccumulateUsage adds an event's reported usage to dst. Only EventDone
+// events carrying a non-nil Usage contribute; others are ignored.
+func AccumulateUsage(dst *UsageTotals, ev runtime.AgentEvent) {
+	if ev.Type == runtime.EventDone && ev.Usage != nil {
+		dst.Input += ev.Usage.InputTokens
+		dst.Output += ev.Usage.OutputTokens
+	}
+}
+
+// errString returns the error message, or "" if err is nil. Used for JSON event payloads.
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // Loop is the core improvement loop that wraps a Harness runtime invocation
@@ -69,6 +114,7 @@ type Loop struct {
 	embedding  memory.EmbeddingProvider // nil when memory is not configured
 	memTool    *harnessmem.MemoryTool   // nil when embedding is nil
 	dispatcher *notify.Dispatcher       // nil when no notifications configured
+	skills     runtime.SkillProvider    // nil when no skills dir present
 }
 
 // New constructs a Loop. Pass nil for embedding to disable memory retrieval and reviewer-driven memory writes.
@@ -78,6 +124,7 @@ func New(db *store.DB, workspace *store.Workspace, cfg *config.Config, repoPath 
 		adapter := memory.NewHarnessStoreAdapter(db, embedding, workspace.ID)
 		memTool = &harnessmem.MemoryTool{Store: adapter}
 	}
+	skills := buildSkillsProvider(repoPath, cfg)
 	return &Loop{
 		db:         db,
 		workspace:  workspace,
@@ -87,6 +134,7 @@ func New(db *store.DB, workspace *store.Workspace, cfg *config.Config, repoPath 
 		embedding:  embedding,
 		memTool:    memTool,
 		dispatcher: notify.NewDispatcher(cfg.Notifications),
+		skills:     skills,
 	}
 }
 
@@ -106,9 +154,26 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		return fmt.Errorf("creating task: %w", err)
 	}
 
+	// ── Budget gate ──────────────────────────────────────────────────────────
+	// Checked before any LLM spend. Fails OPEN: a metering error allows the run
+	// (the cap is a cost guard, not a safety gate — unlike the evaluator).
+	if budget := l.cfg.DailyTokenBudget(); budget > 0 {
+		startOfDay := time.Now().UTC().Truncate(24 * time.Hour)
+		spent, bErr := l.db.SumWorkspaceTokensSince(ctx, l.workspace.ID, startOfDay)
+		if bErr != nil {
+			slog.Warn("budget check failed; allowing run (fail open)", "err", bErr, "task", task.ID)
+		} else if spent >= budget {
+			slog.Info("sidecar: daily token budget reached; skipping", "spent", spent, "budget", budget, "task", task.ID)
+			_ = l.db.AppendTaskEvent(ctx, task.ID, "budget_exceeded", map[string]any{"spent": spent, "budget": budget})
+			_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusSkipped)
+			l.dispatcher.Fire(ctx, notify.EventBudgetExceeded, sig, task)
+			return nil
+		}
+	}
+
 	// ── Triage ──────────────────────────────────────────────────────────────
 	models := ResolveModels(l.cfg)
-	tr, err := triage.Triage(ctx, l.provider, models.Triage, sig, l.cfg)
+	tr, triageUsage, err := triage.Triage(ctx, l.provider, models.Triage, sig, l.cfg)
 	if err != nil {
 		_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusFailed)
 		return fmt.Errorf("triage: %w", err)
@@ -119,6 +184,15 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		"autonomy_level": tr.AutonomyLevel,
 		"reason":         tr.Reason,
 	})
+	if triageUsage.InputTokens+triageUsage.OutputTokens > 0 {
+		_ = l.db.AppendTaskEvent(ctx, task.ID, "usage", map[string]any{
+			"input":  triageUsage.InputTokens,
+			"output": triageUsage.OutputTokens,
+			"total":  triageUsage.InputTokens + triageUsage.OutputTokens,
+			"model":  models.Triage,
+			"role":   "triage",
+		})
+	}
 	if !tr.ShouldAct {
 		slog.Info("sidecar skipping signal", "reason", tr.Reason, "task", task.ID)
 		_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusSkipped)
@@ -153,12 +227,32 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		return err
 	}
 
+	// Code-shipping autonomy levels run in an isolated worktree so concurrent
+	// signals never share a working tree. suggest-only/notify run in-repo.
+	workDir := l.repoPath
+	var wtCleanup func() error
+	var wt *worktree.Worktree
+	if ShipsCode(tr.AutonomyLevel) {
+		w, cleanup, wErr := worktree.Create(l.repoPath, task.ID.String())
+		if wErr != nil {
+			slog.Warn("worktree create failed; falling back to in-repo execution", "err", wErr, "task", task.ID)
+			_ = l.db.AppendTaskEvent(ctx, task.ID, "worktree_degraded", map[string]any{"error": wErr.Error()})
+		} else {
+			wt, wtCleanup, workDir = w, cleanup, w.Path
+			defer func() {
+				if cErr := wtCleanup(); cErr != nil {
+					slog.Warn("worktree cleanup failed", "err", cErr, "task", task.ID)
+				}
+			}()
+		}
+	}
+
 	reg := tool.NewRegistry()
-	reg.Register(&file.ReadFileTool{WorkDir: l.repoPath})
+	reg.Register(&file.ReadFileTool{WorkDir: workDir})
 	if tr.AutonomyLevel != "suggest-only" {
-		reg.Register(&file.WriteFileTool{WorkDir: l.repoPath})
-		reg.Register(&file.EditFileTool{WorkDir: l.repoPath})
-		reg.Register(&bash.BashTool{WorkDir: l.repoPath})
+		reg.Register(&file.WriteFileTool{WorkDir: workDir})
+		reg.Register(&file.EditFileTool{WorkDir: workDir})
+		reg.Register(&bash.BashTool{WorkDir: workDir})
 	}
 	if l.memTool != nil {
 		reg.Register(l.memTool)
@@ -176,7 +270,7 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		ID:           task.ID.String(),
 		Name:         "Sidecar",
 		Model:        models.Coding,
-		Workspace:    l.repoPath,
+		Workspace:    workDir,
 		SystemPrompt: systemPrompt,
 		MaxTurns:     20,
 		Loop: runtime.LoopConfig{
@@ -198,7 +292,7 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 
 	var buildErr error
 	rt, buildErr = runtime.BuildRuntime(
-		runtime.RuntimeDeps{},
+		runtime.RuntimeDeps{Skills: l.skills},
 		runtime.RuntimeInputs{
 			Provider: l.provider,
 			Tools:    reg,
@@ -220,6 +314,7 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 
 	var agentErr error
 	var textBuf strings.Builder
+	var codingUsage UsageTotals
 	for ev := range events {
 		if ev.Type == runtime.EventError {
 			agentErr = ev.Error
@@ -227,11 +322,79 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		if ev.Type == runtime.EventTextDelta {
 			textBuf.WriteString(ev.Text)
 		}
+		AccumulateUsage(&codingUsage, ev)
+	}
+	if codingUsage.Total() > 0 {
+		_ = l.db.AppendTaskEvent(ctx, task.ID, "usage", map[string]any{
+			"input": codingUsage.Input, "output": codingUsage.Output,
+			"total": codingUsage.Total(), "model": models.Coding, "role": "coding",
+		})
 	}
 	if agentErr != nil {
 		_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusFailed)
 		l.dispatcher.Fire(ctx, notify.EventFailed, sig, task)
 		return fmt.Errorf("agent error: %w", agentErr)
+	}
+
+	// ── Adversarial evaluation gate ──────────────────────────────────────────
+	if ShipsCode(tr.AutonomyLevel) && l.cfg.VerificationEnabled() {
+		// Anchor the diff to the worktree base ref so the evaluator sees the
+		// agent's changes even if it self-committed (HEAD would have moved).
+		// In the in-repo fallback (wt == nil) baseRef is "" → Evaluate uses HEAD.
+		baseRef := ""
+		if wt != nil {
+			baseRef = wt.Base
+		}
+		verdict, evalUsage, evalErr := evaluate.Evaluate(ctx, l.provider, models.Evaluator, workDir, baseRef, task.Summary)
+		if evalErr != nil {
+			slog.Warn("evaluator error; failing closed (downgrade to suggestion)", "err", evalErr, "task", task.ID)
+		}
+		// Record evaluator token spend even on error — the tokens were consumed.
+		if evalUsage.InputTokens+evalUsage.OutputTokens > 0 {
+			_ = l.db.AppendTaskEvent(ctx, task.ID, "usage", map[string]any{
+				"input":  evalUsage.InputTokens,
+				"output": evalUsage.OutputTokens,
+				"total":  evalUsage.InputTokens + evalUsage.OutputTokens,
+				"model":  models.Evaluator,
+				"role":   "evaluator",
+			})
+		}
+		_ = l.db.AppendTaskEvent(ctx, task.ID, "evaluation", map[string]any{
+			"pass":    verdict.Pass,
+			"reasons": verdict.Reasons,
+			"model":   models.Evaluator,
+			"error":   errString(evalErr),
+		})
+		if !GateAllowsCommit(verdict, evalErr) {
+			slog.Info("evaluator rejected change; recording as suggestion", "task", task.ID, "reasons", verdict.Reasons)
+			_ = l.db.AppendTaskEvent(ctx, task.ID, "suggestion", map[string]any{
+				"summary":          textBuf.String(),
+				"rejected_reasons": verdict.Reasons,
+			})
+			_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusSuggested)
+			l.dispatcher.Fire(ctx, notify.EventSuggested, sig, task)
+			return nil
+		}
+	}
+
+	// commit creates the output branch. In a worktree it commits in place and
+	// returns the worktree's branch; in-repo it falls back to CommitBranch.
+	commit := func() (string, error) {
+		out := output.New(workDir)
+		if wt != nil {
+			// Detect changes relative to the worktree base ref so an agent
+			// self-commit still routes to PR/completed-with-branch rather than
+			// being misread as "no changes".
+			changed, err := out.CommitInPlaceFrom(wt.Base, "sidecar: "+task.Summary)
+			if err != nil {
+				return "", err
+			}
+			if !changed {
+				return output.BranchNoChanges, nil
+			}
+			return wt.Branch, nil
+		}
+		return out.CommitBranch(task.ID.String(), "sidecar: "+task.Summary)
 	}
 
 	// ── Output routing ───────────────────────────────────────────────────────
@@ -245,8 +408,7 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		return nil
 
 	case "pull-request":
-		out := output.New(l.repoPath)
-		branch, err := out.CommitBranch(task.ID.String(), "sidecar: "+task.Summary)
+		branch, err := commit()
 		if err != nil {
 			_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusFailed)
 			l.dispatcher.Fire(ctx, notify.EventFailed, sig, task)
@@ -274,8 +436,7 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		return nil
 
 	default: // "auto-commit"
-		out := output.New(l.repoPath)
-		branch, err := out.CommitBranch(task.ID.String(), "sidecar: "+task.Summary)
+		branch, err := commit()
 		if err != nil {
 			_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusFailed)
 			l.dispatcher.Fire(ctx, notify.EventFailed, sig, task)
