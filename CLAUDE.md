@@ -80,8 +80,8 @@ internal/
 | **1 — Core Runtime** | ✅ Complete | CLI, git + schedule adapters, Harness loop, PostgreSQL store |
 | **2 — Reactive** | ✅ Complete | CI adapter (GitHub Actions), triage loop, PR creation; adversarial evaluator gate (`internal/evaluate`) + worktree isolation (`internal/worktree`) via `verification.enabled` |
 | **3 — Memory** | ✅ Complete (harness v0.2.0) | pgvector storage; agent-driven writes via harness MemoryTool + HarnessStoreAdapter; runtime.Review fires on LifecycleHooks.OnStop |
-| **4 — Proactive** | Pending | Idle sweeps, `sidecar ask` |
-| **5 — Adapters** | Pending | Logs, metrics, additional CI providers |
+| **4 — Proactive** | 🟡 Partial | `sidecar ask` ✅ (memory-backed Q&A, `internal/cli/ask.go` + `internal/memory/ask.go`); cron maintenance sweeps ✅ (`SignalScheduleTick`). Outstanding: activity-gap-triggered idle sweeps (only cron-scheduled sweeps exist today) |
+| **5 — Adapters** | ✅ Complete | Logs (`internal/adapter/logs`), metrics — Datadog + Prometheus (`internal/adapter/metrics`), CI — GitLab + CircleCI (`internal/adapter/gitlabci`, `circleci`); uptime adapter + diagnostics; Slack/webhook/email notifications |
 
 ## Key Reference
 
