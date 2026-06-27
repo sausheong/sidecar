@@ -173,7 +173,7 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 
 	// ── Triage ──────────────────────────────────────────────────────────────
 	models := ResolveModels(l.cfg)
-	tr, err := triage.Triage(ctx, l.provider, models.Triage, sig, l.cfg)
+	tr, triageUsage, err := triage.Triage(ctx, l.provider, models.Triage, sig, l.cfg)
 	if err != nil {
 		_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusFailed)
 		return fmt.Errorf("triage: %w", err)
@@ -184,6 +184,15 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		"autonomy_level": tr.AutonomyLevel,
 		"reason":         tr.Reason,
 	})
+	if triageUsage.InputTokens+triageUsage.OutputTokens > 0 {
+		_ = l.db.AppendTaskEvent(ctx, task.ID, "usage", map[string]any{
+			"input":  triageUsage.InputTokens,
+			"output": triageUsage.OutputTokens,
+			"total":  triageUsage.InputTokens + triageUsage.OutputTokens,
+			"model":  models.Triage,
+			"role":   "triage",
+		})
+	}
 	if !tr.ShouldAct {
 		slog.Info("sidecar skipping signal", "reason", tr.Reason, "task", task.ID)
 		_ = l.db.UpdateTaskStatus(ctx, task.ID, StatusSkipped)
@@ -336,9 +345,19 @@ func (l *Loop) Run(ctx context.Context, sig adapter.Signal) error {
 		if wt != nil {
 			baseRef = wt.Base
 		}
-		verdict, evalErr := evaluate.Evaluate(ctx, l.provider, models.Evaluator, workDir, baseRef, task.Summary)
+		verdict, evalUsage, evalErr := evaluate.Evaluate(ctx, l.provider, models.Evaluator, workDir, baseRef, task.Summary)
 		if evalErr != nil {
 			slog.Warn("evaluator error; failing closed (downgrade to suggestion)", "err", evalErr, "task", task.ID)
+		}
+		// Record evaluator token spend even on error — the tokens were consumed.
+		if evalUsage.InputTokens+evalUsage.OutputTokens > 0 {
+			_ = l.db.AppendTaskEvent(ctx, task.ID, "usage", map[string]any{
+				"input":  evalUsage.InputTokens,
+				"output": evalUsage.OutputTokens,
+				"total":  evalUsage.InputTokens + evalUsage.OutputTokens,
+				"model":  models.Evaluator,
+				"role":   "evaluator",
+			})
 		}
 		_ = l.db.AppendTaskEvent(ctx, task.ID, "evaluation", map[string]any{
 			"pass":    verdict.Pass,

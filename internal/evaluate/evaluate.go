@@ -102,23 +102,27 @@ func ParseVerdict(raw string) (Verdict, error) {
 //
 // On any setup/run error the caller should fail closed (treat as REJECT); this
 // function returns the error so the caller can record it.
-func Evaluate(ctx context.Context, provider llm.LLMProvider, model, workDir, baseRef, taskSummary string) (Verdict, error) {
+//
+// It also returns the token usage consumed by the evaluator runtime so the
+// caller can meter it toward the daily budget; usage is zero on all early
+// returns (git errors, trivial empty-diff pass, build/run errors, parse error).
+func Evaluate(ctx context.Context, provider llm.LLMProvider, model, workDir, baseRef, taskSummary string) (Verdict, llm.Usage, error) {
 	if baseRef == "" {
 		baseRef = "HEAD"
 	}
 	// Stage everything (including untracked files) so the index reflects exactly
 	// what CommitInPlaceFrom would commit.
 	if addOut, err := exec.Command("git", "-C", workDir, "add", "-A").CombinedOutput(); err != nil {
-		return Verdict{}, fmt.Errorf("git add -A: %w\n%s", err, strings.TrimSpace(string(addOut)))
+		return Verdict{}, llm.Usage{}, fmt.Errorf("git add -A: %w\n%s", err, strings.TrimSpace(string(addOut)))
 	}
 	diffOut, err := exec.Command("git", "-C", workDir, "diff", "--cached", baseRef).CombinedOutput()
 	if err != nil {
-		return Verdict{}, fmt.Errorf("git diff: %w\n%s", err, strings.TrimSpace(string(diffOut)))
+		return Verdict{}, llm.Usage{}, fmt.Errorf("git diff: %w\n%s", err, strings.TrimSpace(string(diffOut)))
 	}
 	diff := strings.TrimSpace(string(diffOut))
 	if diff == "" {
 		// No diff to judge — nothing was shipped; treat as a trivial pass.
-		return Verdict{Pass: true, Reasons: "no changes to evaluate"}, nil
+		return Verdict{Pass: true, Reasons: "no changes to evaluate"}, llm.Usage{}, nil
 	}
 
 	reg := tool.NewRegistry()
@@ -142,26 +146,35 @@ func Evaluate(ctx context.Context, provider llm.LLMProvider, model, workDir, bas
 		},
 	)
 	if err != nil {
-		return Verdict{}, fmt.Errorf("building evaluator runtime: %w", err)
+		return Verdict{}, llm.Usage{}, fmt.Errorf("building evaluator runtime: %w", err)
 	}
 	defer rt.Close()
 
 	events, err := rt.Run(ctx, BuildEvalMessage(taskSummary, diff), nil)
 	if err != nil {
-		return Verdict{}, fmt.Errorf("running evaluator: %w", err)
+		return Verdict{}, llm.Usage{}, fmt.Errorf("running evaluator: %w", err)
 	}
 
 	var sb strings.Builder
+	var usage llm.Usage
 	for ev := range events {
 		if ev.Type == runtime.EventTextDelta {
 			sb.WriteString(ev.Text)
 		}
+		if ev.Type == runtime.EventDone && ev.Usage != nil {
+			usage.InputTokens += ev.Usage.InputTokens
+			usage.OutputTokens += ev.Usage.OutputTokens
+		}
 		if ev.Type == runtime.EventError && ev.Error != nil {
-			return Verdict{}, fmt.Errorf("evaluator event error: %w", ev.Error)
+			return Verdict{}, llm.Usage{}, fmt.Errorf("evaluator event error: %w", ev.Error)
 		}
 	}
 
-	return ParseVerdict(sb.String())
+	verdict, err := ParseVerdict(sb.String())
+	if err != nil {
+		return Verdict{}, llm.Usage{}, err
+	}
+	return verdict, usage, nil
 }
 
 // sessionSuffix derives a short stable-ish suffix for the session id.

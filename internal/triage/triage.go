@@ -45,7 +45,9 @@ func SystemPrompt() string { return triageSystemPrompt }
 
 // Triage calls the triage model to classify a signal.
 // On any failure it returns a conservative default (suggest-only) rather than dropping the signal.
-func Triage(ctx context.Context, provider llm.LLMProvider, model string, sig adapter.Signal, cfg *config.Config) (TriageResult, error) {
+// It also returns the token usage consumed by the triage runtime so the caller
+// can meter it toward the daily budget; usage is zero on all early-return paths.
+func Triage(ctx context.Context, provider llm.LLMProvider, model string, sig adapter.Signal, cfg *config.Config) (TriageResult, llm.Usage, error) {
 	rt, err := runtime.BuildRuntime(
 		runtime.RuntimeDeps{},
 		runtime.RuntimeInputs{
@@ -63,31 +65,36 @@ func Triage(ctx context.Context, provider llm.LLMProvider, model string, sig ada
 	)
 	if err != nil {
 		slog.Warn("triage runtime build failed, defaulting to suggest-only", "err", err)
-		return conservativeDefault(), nil
+		return conservativeDefault(), llm.Usage{}, nil
 	}
 	defer rt.Close()
 
 	events, err := rt.Run(ctx, BuildTriageMessage(sig), nil)
 	if err != nil {
 		slog.Warn("triage run failed, defaulting to suggest-only", "err", err)
-		return conservativeDefault(), nil
+		return conservativeDefault(), llm.Usage{}, nil
 	}
 
 	var sb strings.Builder
+	var usage llm.Usage
 	for ev := range events {
 		if ev.Type == runtime.EventTextDelta {
 			sb.WriteString(ev.Text)
+		}
+		if ev.Type == runtime.EventDone && ev.Usage != nil {
+			usage.InputTokens += ev.Usage.InputTokens
+			usage.OutputTokens += ev.Usage.OutputTokens
 		}
 	}
 
 	result, err := ParseTriageResponse(sb.String())
 	if err != nil {
 		slog.Warn("triage response parse failed, defaulting to suggest-only", "err", err, "raw", sb.String())
-		return conservativeDefault(), nil
+		return conservativeDefault(), llm.Usage{}, nil
 	}
 
 	result.AutonomyLevel = ResolveAutonomy(result.ChangeType, cfg)
-	return result, nil
+	return result, usage, nil
 }
 
 // BuildTriageMessage constructs the user-turn message sent to the triage agent.
